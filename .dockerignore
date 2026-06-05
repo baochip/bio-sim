@@ -1,0 +1,10 @@
+# Keep host build artifacts and junk OUT of the image build context.
+# This matters for two reasons: a smaller/faster context upload, and so your
+# locally-compiled build/ (host binaries) never leaks into the image -- the
+# image rebuilds bio_sim itself.
+build/
+*.fst
+*.vcd
+sim/json.hpp
+.git/
+.gitignore

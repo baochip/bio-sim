@@ -1,0 +1,4 @@
+build/
+*.fst
+*.vcd
+sim/json.hpp
