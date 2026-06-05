@@ -1,0 +1,5 @@
+{
+  "fclk_mhz": 700,
+  "trace": { "file": "trace.fst", "format": "fst" },
+  "run":   { "max_cycles": 0, "stop_on_trap": false }
+}
