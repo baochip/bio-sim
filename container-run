@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Convenience wrapper for the container flow. Works with podman or docker.
+#
+#   ./container-run                      # run configs/smoke.json (build only if image missing)
+#   ./container-run configs/foo.json     # run a specific config
+#   ./container-run --rebuild [config]   # rebuild image first (after editing rtl/ or sim/)
+#   ./container-run --build-only         # just (re)build the image, don't run
+#   CONTAINER_ENGINE=docker ./container-run ...   # force an engine
+#
+# The image is built ONCE and reused. You only need --rebuild after changing
+# RTL or the harness; changing configs/firmware needs no rebuild (they're
+# mounted at runtime, not baked into the image).
+set -euo pipefail
+cd "$(dirname "$0")"
+
+IMAGE=bio-sim
+
+# Prefer podman (rootless, daemonless); fall back to docker.
+ENGINE="${CONTAINER_ENGINE:-}"
+if [ -z "$ENGINE" ]; then
+    if   command -v podman >/dev/null 2>&1; then ENGINE=podman
+    elif command -v docker >/dev/null 2>&1; then ENGINE=docker
+    else echo "error: neither podman nor docker found on PATH" >&2; exit 1; fi
+fi
+
+REBUILD=0; BUILD_ONLY=0; CONFIG=configs/smoke.json
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -b|--rebuild)  REBUILD=1 ;;
+        --build-only)  REBUILD=1; BUILD_ONLY=1 ;;
+        -h|--help)     echo "usage: $0 [--rebuild|--build-only] [config.json]"; exit 0 ;;
+        *)             CONFIG="$1" ;;
+    esac
+    shift
+done
+
+build_image() {
+    local flags=()
+    # podman's build does NOT always cache intermediate layers by default the
+    # way docker does; --layers makes the cached-build behaviour explicit so a
+    # rebuild that didn't touch rtl/ or sim/ is fast.
+    [ "$ENGINE" = podman ] && flags+=(--layers)
+    "$ENGINE" build "${flags[@]}" -t "$IMAGE" .
+}
+
+if [ "$REBUILD" = 1 ] || ! "$ENGINE" image inspect "$IMAGE" >/dev/null 2>&1; then
+    build_image
+else
+    echo ">> reusing image '$IMAGE'  (use --rebuild after editing rtl/ or sim/)"
+fi
+
+[ "$BUILD_ONLY" = 1 ] && exit 0
+
+# rootless podman maps container-root -> your host user already; --user there
+# would break output ownership. docker needs --user to avoid root-owned files.
+RUNFLAGS=( --rm -v "$PWD:/work" )
+[ "$ENGINE" = docker ] && RUNFLAGS+=( --user "$(id -u):$(id -g)" )
+
+exec "$ENGINE" run "${RUNFLAGS[@]}" "$IMAGE" "$CONFIG"

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Dev convenience wrapper for the STANDALONE (non-container) flow.
+# Builds once if needed, then runs the given config.
+#   ./simulate configs/smoke.json
+set -euo pipefail
+cd "$(dirname "$0")"
+CONFIG="${1:-configs/smoke.json}"
+make build
+exec build/bio_sim "$CONFIG"
