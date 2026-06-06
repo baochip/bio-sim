@@ -185,3 +185,96 @@ Right clicking and dragging will allow you to zoom into the waveform. The simula
 
 ![detail of hello world example](docs/gtkw-hello-detail.png)
 
+## Serve modes (live socket interaction)
+
+The `serve` command turns the running simulation into a TCP server so an
+external program (in any language) can drive inputs and read results over a
+socket. The sim is always the **server**; your script is the **client** that
+connects. The sim only starts listening once it reaches the `serve` command,
+i.e. *after* the preceding `load` / `clock` / `start` setup has run.
+
+There are two modes, chosen by the `"mode"` field. They exist because there
+are two fundamentally different things you might want, and they cannot be the
+same loop.
+
+### `realtime` (default) - free-running, human-in-the-loop
+
+The sim runs continuously, as fast as the host allows. Inputs you send take
+effect at the next cycle boundary, and monitored output transitions stream back
+as they happen. This is the mode behind the keyboard/toggle demos.
+
+Because the sim advances on wall-clock time (not on your commands), simulated
+time and real time are **not** proportional and the run is **not**
+reproducible. That's fine for "does my pin react" interaction, but it is wrong
+for anything whose correctness depends on exact cycle timing.
+
+```jsonc
+{ "cmd": "serve", "port": 5555, "mode": "realtime",
+  "wait_for_client": true,   // block until a client connects before advancing
+  "max_cycles": 0,           // 0 = run until stop/Ctrl-C; otherwise stop after N
+  "min_dwell": 2000 }        // min cycles an input is held before the next `set`
+```
+
+`min_dwell` matters: if a client sends `set`s faster than the sim samples them,
+they would collapse into one net change at a single simulated instant. Holding
+each input at least `min_dwell` cycles lets the program actually observe each
+one. Tune it up toward your program's input-to-reaction latency if fast inputs
+get dropped.
+
+| Client → sim | Sim → client |
+|---|---|
+| `set <pin> <val>` - drive a `gpio_in` bit (paced) | `# bio-sim ready` (banner) |
+| `get <signal>` - query a signal | `evt <cycle> <signal> <bit> <val>` (per transition) |
+| `stop` - end the session | `val <signal> 0x........` (reply to `get`) |
+| | `# bye` (on stop) |
+
+### `driven` - lock-step, deterministic
+
+The sim advances **only** when you tell it to with `run`. You schedule
+timestamped input edges with `inject`, advance a controlled number of cycles,
+then read results back. Because nothing happens except on your commands, the
+result is **identical every run**, regardless of how fast or jittery the socket
+is. This is the mode for protocol bring-up (I2S, SPI, UART, …), where stimulus
+timing is defined in clock cycles and you need reproducibility.
+
+```jsonc
+{ "cmd": "serve", "port": 5555, "mode": "driven",
+  "wait_for_client": true }
+```
+
+(`max_cycles` / `min_dwell` do not apply here - advancing is explicit.)
+
+| Client → sim | Sim → client |
+|---|---|
+| `inject <relcycle> <pin> <val>` - schedule a pin edge (no reply) | `# bio-sim ready (driven)` (banner) |
+| `run <n>` - advance n cycles | `ran <n>` (after the run completes) |
+| `fifo_drain <bank>` - read all available words | `drain <bank> <count>`, then `<count>` × `sample 0x........` |
+| `fifo_read <bank> <count>` - read exactly count | (same shape as `drain`) |
+| `set <pin> <val>` - input applied on next `run` | `val <signal> 0x........` (reply to `get`) |
+| `get <signal>` - query a signal | `# bye` (on stop) |
+| `stop` - end the session | |
+
+`relcycle` is relative to the sim's current cycle when the `inject` is received,
+so a client typically ships all of a waveform's edges up front, then `run`s
+through them in chunks, draining the FIFO between chunks. Unlike `realtime`,
+driven mode does **not** stream `evt` transitions - the channel stays a clean
+request/response, and the FST captures every transition for waveform viewing.
+FIFO ops use the main SFR port only.
+
+### Which to use
+
+- **`realtime`** - interactive demos, "watch my output react to an input I'm
+  wiggling", when your test case is better with some non-determinism, etc.
+  Wall-clock coupled, not reproducible.
+- **`driven`** - automated and protocol-accurate testing where edge timing is
+  defined in cycles and results must be deterministic. Primarily useful
+  for language-agnostic test vector generation. Examples are in Python but
+  the use of a socket allows any language to generate and run the simulator.
+
+### Connecting
+
+The sim listens *inside* the container, so the port must be published to the
+host. `container-run` auto-detects the `"port"` from the config and publishes
+it; pass `--port N` to override. Confirm the right binary is running by the
+banner: `realtime` greets with `# bio-sim ready`, `driven` with
+`# bio-sim ready (driven)`.
