@@ -2,3 +2,10 @@ build/
 *.fst
 *.vcd
 sim/json.hpp
+
+# zig artifacts
+.zig-cache/
+zig-out/
+
+# built binaries
+*.bin
