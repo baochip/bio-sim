@@ -49,7 +49,38 @@
 #include <string>
 #include <vector>
 
+// real-time serve mode (POSIX sockets + a reader thread)
+#include <atomic>
+#include <cerrno>
+#include <csignal>
+#include <cstring>
+#include <deque>
+#include <mutex>
+#include <sstream>
+#include <thread>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 using json = nlohmann::json;
+
+// Set by SIGINT so the serve loop unwinds to the normal FST-close path instead
+// of the process being killed mid-trace.
+static std::atomic<bool> g_stop{false};
+static void on_sigint(int) { g_stop = true; }
+
+// mkdir -p for a (possibly nested) directory path; ignores already-exists.
+static void mkdir_p(const std::string& dir) {
+    std::string acc;
+    for (size_t i = 0; i < dir.size(); ++i) {
+        acc.push_back(dir[i]);
+        if (dir[i] == '/' || i + 1 == dir.size())
+            if (!acc.empty() && acc != "/") ::mkdir(acc.c_str(), 0777);
+    }
+}
 
 // --------------------------------------------------------------------------
 // SFR name -> byte offset on the MAIN APB port. readonly registers warn on poke.
@@ -130,8 +161,10 @@ public:
                      std::function<uint32_t()> get; uint32_t last; };
     std::vector<Monitor> monitors;
 
-    struct Inject { uint64_t at_cycle; int pin; int value; bool fired; };
+    struct Inject { uint64_t at_cycle; int pin; int value; };
     std::vector<Inject> injects;
+    size_t inject_cursor = 0;
+    bool   inject_dirty  = false;
 
     Sim(VerilatedContext* c, double fclk_mhz) : ctx(c) {
         dut = new Vbio_bdma_wrapper{c};
@@ -147,9 +180,15 @@ public:
     ~Sim() { if (tfp) { tfp->close(); delete tfp; } delete dut; }
 
     void open_trace(const std::string& p) {
+        // Bare filenames go under waveform/; explicit paths are honored as-is.
+        std::string out = p;
+        if (out.find('/') == std::string::npos) out = "waveform/" + out;
+        auto slash = out.find_last_of('/');
+        if (slash != std::string::npos) mkdir_p(out.substr(0, slash));
         Verilated::traceEverOn(true);
-        tfp = new VerilatedFstC; dut->trace(tfp, 99); tfp->open(p.c_str());
+        tfp = new VerilatedFstC; dut->trace(tfp, 99); tfp->open(out.c_str());
         tracing = true;
+        printf("[trace] writing %s\n", out.c_str());
     }
 
     void bind_ports() {
@@ -226,18 +265,33 @@ public:
         printf("[mon] watching %s%s\n", name.c_str(),
                has_bit ? (" bit "+std::to_string(bit)).c_str() : "");
     }
+    // optional sink for machine-readable event lines (set during serve mode)
+    std::function<void(const std::string&)> event_sink;
+
     void sample_monitors() {
         for (auto& m : monitors) {
             uint32_t cur=m.get();
             if (m.has_bit) {
                 uint32_t a=(m.last>>m.bit)&1, b=(cur>>m.bit)&1;
-                if (a!=b) printf("[mon] cyc=%llu (%llu ps)  %s[%d]: %u -> %u\n",
-                    (unsigned long long)cycle,(unsigned long long)time_ps,
-                    m.name.c_str(),m.bit,a,b);
+                if (a!=b) {
+                    printf("[mon] cyc=%llu (%llu ps)  %s[%d]: %u -> %u\n",
+                        (unsigned long long)cycle,(unsigned long long)time_ps,
+                        m.name.c_str(),m.bit,a,b);
+                    if (event_sink) {
+                        char e[96]; snprintf(e,sizeof e,"evt %llu %s %d %u",
+                            (unsigned long long)cycle,m.name.c_str(),m.bit,b);
+                        event_sink(e);
+                    }
+                }
             } else if (cur!=m.last) {
                 printf("[mon] cyc=%llu (%llu ps)  %s: 0x%08x -> 0x%08x\n",
                     (unsigned long long)cycle,(unsigned long long)time_ps,
                     m.name.c_str(),m.last,cur);
+                if (event_sink) {
+                    char e[96]; snprintf(e,sizeof e,"evt %llu %s * 0x%08x",
+                        (unsigned long long)cycle,m.name.c_str(),cur);
+                    event_sink(e);
+                }
             }
             m.last=cur;
         }
@@ -250,17 +304,21 @@ public:
         dut->gpio_in=g;
     }
     void schedule_inject(uint64_t rel_cycle, int pin, int val) {
-        injects.push_back({cycle+rel_cycle, pin, val, false});
-        std::sort(injects.begin(), injects.end(),
-                  [](const Inject&a,const Inject&b){return a.at_cycle<b.at_cycle;});
+        injects.push_back({cycle+rel_cycle, pin, val});
+        inject_dirty = true;        // sort lazily before the next application
     }
     void apply_due_injects() {
-        for (auto& e : injects)
-            if (!e.fired && e.at_cycle<=cycle) {
-                set_gpio_in_bit(e.pin, e.value); e.fired=true;
-                printf("[inject] cyc=%llu gpio_in[%d] = %d\n",
-                       (unsigned long long)cycle, e.pin, e.value);
-            }
+        if (inject_dirty) {
+            // Only the not-yet-applied tail can be out of order; newly scheduled
+            // events always have at_cycle >= current cycle >= everything applied.
+            std::stable_sort(injects.begin()+inject_cursor, injects.end(),
+                [](const Inject&a,const Inject&b){return a.at_cycle<b.at_cycle;});
+            inject_dirty = false;
+        }
+        while (inject_cursor < injects.size() && injects[inject_cursor].at_cycle <= cycle) {
+            const Inject& e = injects[inject_cursor++];
+            set_gpio_in_bit(e.pin, e.value);
+        }
     }
 
     // one fclk cycle, with injection applied first and monitors sampled after
@@ -297,6 +355,128 @@ public:
         }
         if (bar) { draw_bar(done,cycles,t0); fprintf(stderr,"\n"); }
         return trapped;
+    }
+
+    // ---- real-time serve mode -----------------------------------------
+    int client_fd = -1;
+
+    void send_line(const std::string& s) {
+        if (client_fd < 0) return;
+        std::string m = s; m.push_back('\n');
+        ::send(client_fd, m.data(), m.size(), MSG_NOSIGNAL);
+    }
+    uint32_t read_signal(const std::string& n) {
+        if (n=="gpio_out") return (uint32_t)dut->gpio_out;
+        if (n=="gpio_in")  return (uint32_t)dut->gpio_in;
+        if (n=="gpio_dir") return (uint32_t)dut->gpio_dir;
+        if (n=="irq")      return (uint32_t)dut->irq;
+        return 0;
+    }
+    // returns true if the client asked to stop
+    bool handle_serve_line(const std::string& line) {
+        std::istringstream is(line); std::string op; is >> op;
+        if (op.empty() || op[0]=='#') return false;
+        if (op=="set") {
+            int pin, val;
+            if (is>>pin>>val) set_gpio_in_bit(pin, val?1:0);
+            return false;
+        }
+        if (op=="get") {
+            std::string sig;
+            if (is>>sig) { char b[96]; snprintf(b,sizeof b,"val %s 0x%08x",sig.c_str(),read_signal(sig)); send_line(b); }
+            return false;
+        }
+        if (op=="stop" || op=="quit") return true;
+        send_line("# err unknown command: " + op);
+        return false;
+    }
+
+    // Listen on `port`, accept one client, then free-run: apply inbound `set`
+    // commands at cycle boundaries (latest-value-wins) and stream monitored
+    // output transitions back as `evt` lines. Runs until the client sends
+    // stop, disconnects, SIGINT fires, or max_cycles (0 = unlimited) is hit.
+    void serve(int port, bool wait_for_client, uint64_t max_cycles, uint64_t min_dwell) {
+        int lfd = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (lfd < 0) { perror("[serve] socket"); return; }
+        int yes=1; ::setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
+        sockaddr_in addr{}; addr.sin_family=AF_INET;
+        addr.sin_addr.s_addr=INADDR_ANY; addr.sin_port=htons((uint16_t)port);
+        if (::bind(lfd,(sockaddr*)&addr,sizeof addr) < 0) { perror("[serve] bind"); ::close(lfd); return; }
+        if (::listen(lfd,1) < 0) { perror("[serve] listen"); ::close(lfd); return; }
+        printf("[serve] listening on 0.0.0.0:%d  (fclk=%llu Hz)\n", port,(unsigned long long)fclk_hz);
+        fflush(stdout);
+
+        int cfd = -1;
+        if (wait_for_client) {
+            pollfd pfd{lfd, POLLIN, 0};
+            while (!g_stop) {
+                int r = ::poll(&pfd, 1, 200);
+                if (r>0 && (pfd.revents & POLLIN)) { cfd = ::accept(lfd,nullptr,nullptr); break; }
+                if (r<0 && errno!=EINTR) { perror("[serve] poll"); break; }
+            }
+        }
+        if (cfd < 0) { ::close(lfd); printf("[serve] no client; stopping\n"); return; }
+        client_fd = cfd;
+        printf("[serve] client connected\n"); fflush(stdout);
+        send_line("# bio-sim ready");
+
+        std::mutex mtx; std::deque<std::string> inq; std::atomic<bool> closed{false};
+        std::thread reader([&]{
+            std::string buf; char tmp[1024];
+            while (!g_stop && !closed) {
+                ssize_t n = ::recv(cfd, tmp, sizeof tmp, 0);
+                if (n <= 0) { closed = true; break; }
+                buf.append(tmp, n);
+                size_t pos;
+                while ((pos=buf.find('\n')) != std::string::npos) {
+                    std::string line = buf.substr(0,pos); buf.erase(0,pos+1);
+                    if (!line.empty() && line.back()=='\r') line.pop_back();
+                    std::lock_guard<std::mutex> lk(mtx); inq.push_back(line);
+                }
+            }
+        });
+
+        event_sink = [this](const std::string& s){ send_line(s); };
+
+        auto t_beat = std::chrono::steady_clock::now();
+        uint64_t ran=0, last_input_cycle=0; bool local_stop=false, primed=false;
+        while (!g_stop && !closed && !local_stop && (max_cycles==0 || ran<max_cycles)) {
+            // Process at most one queued command per tick. `set` commands are
+            // paced: each input change is held >= min_dwell cycles before the
+            // next is applied. Without this, a fast burst of keypresses arrives
+            // between two clock edges and collapses 1->0->1 into a single net
+            // change that the program never gets to sample. Non-`set` commands
+            // (get/stop) are processed immediately.
+            std::string line; bool have=false, is_set=false;
+            {
+                std::lock_guard<std::mutex> lk(mtx);
+                if (!inq.empty()) {
+                    is_set = inq.front().rfind("set",0)==0;
+                    if (!is_set || !primed || (cycle - last_input_cycle) >= min_dwell) {
+                        line = inq.front(); inq.pop_front(); have=true;
+                    }
+                }
+            }
+            if (have) {
+                local_stop |= handle_serve_line(line);
+                if (is_set) { last_input_cycle = cycle; primed = true; }
+            }
+            tick(); ran++;
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration<double>(now - t_beat).count() > 2.0) {
+                fprintf(stderr,"\r[serve] running, cyc=%llu   ",(unsigned long long)cycle); fflush(stderr);
+                t_beat = now;
+            }
+        }
+
+        event_sink = nullptr;
+        send_line("# bye");
+        closed = true;
+        ::shutdown(cfd, SHUT_RDWR);
+        reader.join();
+        ::close(cfd); ::close(lfd); client_fd = -1;
+        fprintf(stderr,"\n");
+        printf("[serve] stopped after %llu cycles\n",(unsigned long long)ran);
     }
 };
 
@@ -429,6 +609,27 @@ static void execute_command(Sim& sim, const json& c) {
         for (int i=0;i<n;++i) {
             uint32_t v = sim.apb_read(sim.ports[port], off);
             printf("[fifo_read]   [%d] = 0x%08x\n", i, v);
+        }
+
+    } else if (cmd=="fifo_drain") {
+        // Read sfr_flevel for this bank; if non-empty, pop up to `max` words
+        // (default: all available). Prints each as hex and as a signed 16-bit
+        // sample, which is handy for confirming decoded audio.
+        int bank = c.at("bank").get<int>();
+        std::string port = fifo_port(c, bank);
+        uint32_t flevel = sim.apb_read(sim.ports[port], SFR.at("sfr_flevel").offset);
+        uint32_t level  = (flevel >> (4*bank)) & 0xF;
+        uint32_t want   = c.contains("max") ? parse_u32(c["max"]) : level;
+        uint32_t n      = std::min(level, want);
+        uint32_t off    = Sim::fifo_off(bank, false);
+        if (n == 0) {
+            printf("[fifo_drain] bank %d empty\n", bank);
+        } else {
+            printf("[fifo_drain] bank %d level=%u, reading %u\n", bank, level, n);
+            for (uint32_t i=0;i<n;++i) {
+                uint32_t v = sim.apb_read(sim.ports[port], off);
+                printf("[fifo_drain]   [%u] = 0x%08x  (s16=%d)\n", i, v, (int)(int16_t)(v & 0xFFFF));
+            }
         }
 
     } else if (cmd=="start") {
@@ -571,6 +772,13 @@ static void execute_command(Sim& sim, const json& c) {
         sim.apb_write(sim.ports["sfr"], SFR.at("sfr_irq_edge").offset, e);
         printf("[irq] line %d mask=0x%08x edge=%d  (irq_edge=0x%x)\n", which, mask, edge, e & 0xF);
 
+    } else if (cmd=="serve") {
+        int port = c.value("port", 5555);
+        bool wfc = c.value("wait_for_client", true);
+        uint64_t maxc = c.contains("max_cycles") ? parse_u64(c["max_cycles"]) : 0;
+        uint64_t dwell = c.contains("min_dwell") ? parse_u64(c["min_dwell"]) : 2000;
+        sim.serve(port, wfc, maxc, dwell);
+
     } else if (cmd=="run" || cmd=="delay") {
         uint64_t cyc = c.contains("cycles")     ? parse_u64(c["cycles"])
                      : c.contains("max_cycles") ? parse_u64(c["max_cycles"])   // legacy
@@ -607,13 +815,17 @@ static json build_commands(const json& cfg) {
 int main(int argc, char** argv) {
     VerilatedContext ctx;
     ctx.commandArgs(argc, argv);
+    std::signal(SIGINT, on_sigint);   // clean unwind from serve mode -> FST close
     if (argc < 2) { fprintf(stderr,"usage: %s <config.json>\n", argv[0]); return 2; }
 
     json cfg;
     try {
         std::ifstream cf(argv[1]);
         if (!cf) { fprintf(stderr,"cannot open config: %s\n", argv[1]); return 2; }
-        cf >> cfg;
+        // ignore_comments=true allows // line and /* */ block comments (a JSONC
+        // superset). Strict JSON still parses unchanged.
+        cfg = json::parse(cf, /*callback=*/nullptr, /*allow_exceptions=*/true,
+                          /*ignore_comments=*/true);
     } catch (const std::exception& e) {
         fprintf(stderr,"config parse error: %s\n", e.what()); return 2;
     }
