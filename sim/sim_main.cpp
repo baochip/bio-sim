@@ -478,6 +478,101 @@ public:
         fprintf(stderr,"\n");
         printf("[serve] stopped after %llu cycles\n",(unsigned long long)ran);
     }
+
+    // ---- driven (lock-step, deterministic) serve mode -----------------
+    // The sim advances ONLY on `run` commands and replies to reads, so an
+    // external model can drive timestamped stimulus and read results back with
+    // full determinism (wall-clock / socket jitter cannot affect the result).
+    // Protocol (newline text):
+    //   inject <relcycle> <pin> <val>   schedule a pin edge (no reply)
+    //   run <n>                         advance n cycles -> reply: ran <n>
+    //   fifo_drain <bank>               -> reply: drain <bank> <count>, then
+    //                                     <count> lines: sample 0x........
+    //   fifo_read  <bank> <count>       same shape, explicit count
+    //   set <pin> <val>                 immediate input (no reply)
+    //   get <signal>                    -> reply: val <signal> 0x........
+    //   stop                            end session
+    int serve_accept(int port, bool wait_for_client, int* lfd_out) {
+        int lfd = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (lfd < 0) { perror("[serve] socket"); return -1; }
+        int yes=1; ::setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
+        sockaddr_in addr{}; addr.sin_family=AF_INET;
+        addr.sin_addr.s_addr=INADDR_ANY; addr.sin_port=htons((uint16_t)port);
+        if (::bind(lfd,(sockaddr*)&addr,sizeof addr) < 0) { perror("[serve] bind"); ::close(lfd); return -1; }
+        if (::listen(lfd,1) < 0) { perror("[serve] listen"); ::close(lfd); return -1; }
+        printf("[serve] listening on 0.0.0.0:%d\n", port); fflush(stdout);
+        int cfd=-1;
+        if (wait_for_client) {
+            pollfd pfd{lfd, POLLIN, 0};
+            while (!g_stop) {
+                int r=::poll(&pfd,1,200);
+                if (r>0 && (pfd.revents&POLLIN)) { cfd=::accept(lfd,nullptr,nullptr); break; }
+                if (r<0 && errno!=EINTR) { perror("[serve] poll"); break; }
+            }
+        }
+        *lfd_out = lfd; return cfd;
+    }
+
+    bool handle_driven_line(const std::string& line) {
+        std::istringstream is(line); std::string op; is >> op;
+        if (op.empty() || op[0]=='#') return false;
+        if (op=="inject") { uint64_t cyc; int pin,val;
+            if (is>>cyc>>pin>>val) schedule_inject(cyc,pin,val); return false; }
+        if (op=="run") { uint64_t n=0; is>>n; run(n,false);
+            char b[64]; snprintf(b,sizeof b,"ran %llu",(unsigned long long)n); send_line(b); return false; }
+        if (op=="set") { int pin,val; if (is>>pin>>val) set_gpio_in_bit(pin,val); return false; }
+        if (op=="get") { std::string s; if (is>>s) {
+            char b[96]; snprintf(b,sizeof b,"val %s 0x%08x",s.c_str(),read_signal(s)); send_line(b);} return false; }
+        if (op=="fifo_drain" || op=="fifo_read") {
+            int bank=0; is>>bank;
+            uint32_t flevel=apb_read(ports["sfr"], SFR.at("sfr_flevel").offset);
+            uint32_t level=(flevel>>(4*bank))&0xF, n=level;
+            if (op=="fifo_read") { uint32_t want; if (is>>want) n=want; }
+            char hdr[48]; snprintf(hdr,sizeof hdr,"drain %d %u",bank,n); send_line(hdr);
+            uint32_t off=fifo_off(bank,false);
+            for (uint32_t i=0;i<n;++i) {
+                uint32_t v=apb_read(ports["sfr"],off);
+                char b[48]; snprintf(b,sizeof b,"sample 0x%08x",v); send_line(b);
+            }
+            return false;
+        }
+        if (op=="stop" || op=="quit") return true;
+        send_line("# err unknown command: " + op);
+        return false;
+    }
+
+    void serve_driven(int port, bool wait_for_client) {
+        int lfd=-1; int cfd=serve_accept(port, wait_for_client, &lfd);
+        if (cfd < 0) { if (lfd>=0) ::close(lfd); printf("[serve] no client; stopping\n"); return; }
+        client_fd=cfd;
+        printf("[serve] driven client connected\n"); fflush(stdout);
+        send_line("# bio-sim ready (driven)");
+
+        std::string bufd; std::string line;
+        auto next_line = [&](std::string& out)->bool {
+            for (;;) {
+                size_t pos=bufd.find('\n');
+                if (pos!=std::string::npos) {
+                    out=bufd.substr(0,pos); bufd.erase(0,pos+1);
+                    if (!out.empty() && out.back()=='\r') out.pop_back();
+                    return true;
+                }
+                pollfd pfd{cfd, POLLIN, 0};
+                int r=::poll(&pfd,1,200);
+                if (g_stop) return false;
+                if (r>0 && (pfd.revents&POLLIN)) {
+                    char tmp[2048]; ssize_t n=::recv(cfd,tmp,sizeof tmp,0);
+                    if (n<=0) return false;
+                    bufd.append(tmp,n);
+                }
+            }
+        };
+        while (!g_stop) { if (!next_line(line)) break; if (handle_driven_line(line)) break; }
+
+        send_line("# bye");
+        ::shutdown(cfd,SHUT_RDWR); ::close(cfd); ::close(lfd); client_fd=-1;
+        printf("[serve] driven session ended (cyc=%llu)\n",(unsigned long long)cycle);
+    }
 };
 
 // --------------------------------------------------------------------------
@@ -775,9 +870,14 @@ static void execute_command(Sim& sim, const json& c) {
     } else if (cmd=="serve") {
         int port = c.value("port", 5555);
         bool wfc = c.value("wait_for_client", true);
-        uint64_t maxc = c.contains("max_cycles") ? parse_u64(c["max_cycles"]) : 0;
-        uint64_t dwell = c.contains("min_dwell") ? parse_u64(c["min_dwell"]) : 2000;
-        sim.serve(port, wfc, maxc, dwell);
+        std::string mode = c.value("mode", std::string("realtime"));
+        if (mode=="driven") {
+            sim.serve_driven(port, wfc);
+        } else {
+            uint64_t maxc = c.contains("max_cycles") ? parse_u64(c["max_cycles"]) : 0;
+            uint64_t dwell = c.contains("min_dwell") ? parse_u64(c["min_dwell"]) : 2000;
+            sim.serve(port, wfc, maxc, dwell);
+        }
 
     } else if (cmd=="run" || cmd=="delay") {
         uint64_t cyc = c.contains("cycles")     ? parse_u64(c["cycles"])
