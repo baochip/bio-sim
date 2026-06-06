@@ -44,8 +44,18 @@ build_image() {
     "$ENGINE" build "${flags[@]}" -t "$IMAGE" .
 }
 
-if [ "$REBUILD" = 1 ] || ! "$ENGINE" image inspect "$IMAGE" >/dev/null 2>&1; then
+REMOTE_IMAGE="ghcr.io/YOURORG/bio-sim:latest"  # set this at top of script
+
+if [ "$REBUILD" = 1 ]; then
     build_image
+elif ! "$ENGINE" image inspect "$IMAGE" >/dev/null 2>&1; then
+    echo ">> image '$IMAGE' not found locally — pulling from $REMOTE_IMAGE"
+    if "$ENGINE" pull "$REMOTE_IMAGE"; then
+        "$ENGINE" tag "$REMOTE_IMAGE" "$IMAGE"
+    else
+        echo ">> pull failed, falling back to local build"
+        build_image
+    fi
 else
     echo ">> reusing image '$IMAGE'  (use --rebuild after editing rtl/ or sim/)"
 fi
