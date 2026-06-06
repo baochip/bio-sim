@@ -52,6 +52,14 @@ fi
 
 [ "$BUILD_ONLY" = 1 ] && exit 0
 
+# If no --port was given, auto-detect a serve port from the config so it gets
+# published without the user having to remember the flag. (A serve sim listens
+# inside the container; the port must be published to be reachable from the host.)
+if [ -z "$PORT" ] && [ -f "$CONFIG" ]; then
+    PORT=$(grep -oE '"port"[[:space:]]*:[[:space:]]*[0-9]+' "$CONFIG" | grep -oE '[0-9]+' | head -1 || true)
+    [ -n "$PORT" ] && echo ">> auto-publishing serve port $PORT (from $CONFIG; override with --port)"
+fi
+
 # rootless podman maps container-root -> your host user already; --user there
 # would break output ownership. docker needs --user to avoid root-owned files.
 RUNFLAGS=( --rm -v "$PWD:/work" )
