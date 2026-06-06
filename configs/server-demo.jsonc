@@ -1,0 +1,18 @@
+{
+  "fclk_mhz": 700,
+  "trace": { "file": "serve.fst" },
+  "commands": [
+    { "cmd": "load",    "core": 0, "bin": "sw/invert/invert.bin" },
+    { "cmd": "clock",   "core": 0, "style": "frac", "freq_hz": 10000000 },
+    { "cmd": "monitor", "signal": "gpio_out", "bit": 1 },
+    { "cmd": "monitor", "signal": "gpio_out", "bit": 2 },
+    { "cmd": "start",   "cores": [0] },
+    {
+      "cmd": "serve",
+      "port": 5555,
+      "wait_for_client": true,
+      "max_cycles": 0,
+      "min_dwell": 2000
+    }
+  ]
+}

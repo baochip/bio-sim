@@ -9,3 +9,6 @@ zig-out/
 
 # built binaries
 *.bin
+
+# Maintainer's notes & todo's
+notes.md

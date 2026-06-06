@@ -23,12 +23,13 @@ if [ -z "$ENGINE" ]; then
     else echo "error: neither podman nor docker found on PATH" >&2; exit 1; fi
 fi
 
-REBUILD=0; BUILD_ONLY=0; CONFIG=configs/smoke.json
+REBUILD=0; BUILD_ONLY=0; CONFIG=configs/smoke.json; PORT=""
 while [ $# -gt 0 ]; do
     case "$1" in
         -b|--rebuild)  REBUILD=1 ;;
         --build-only)  REBUILD=1; BUILD_ONLY=1 ;;
-        -h|--help)     echo "usage: $0 [--rebuild|--build-only] [config.json]"; exit 0 ;;
+        -p|--port)     PORT="$2"; shift ;;
+        -h|--help)     echo "usage: $0 [--rebuild|--build-only] [--port N] [config.json]"; exit 0 ;;
         *)             CONFIG="$1" ;;
     esac
     shift
@@ -55,5 +56,7 @@ fi
 # would break output ownership. docker needs --user to avoid root-owned files.
 RUNFLAGS=( --rm -v "$PWD:/work" )
 [ "$ENGINE" = docker ] && RUNFLAGS+=( --user "$(id -u):$(id -g)" )
+# publish the serve port to localhost so a host client can connect
+[ -n "$PORT" ] && RUNFLAGS+=( -p "127.0.0.1:${PORT}:${PORT}" )
 
 exec "$ENGINE" run "${RUNFLAGS[@]}" "$IMAGE" "$CONFIG"

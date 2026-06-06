@@ -1,0 +1,10 @@
+{
+  "fclk_mhz": 700,
+  "commands": [
+    { "cmd": "clock", "core": 0, "style": "frac",     "freq_hz": 2400000 },
+    { "cmd": "clock", "core": 1, "style": "int",      "freq_hz": 1000000 },
+    { "cmd": "clock", "core": 2, "style": "fixed",    "div_int": 4, "div_frac": 0 },
+    { "cmd": "clock", "core": 3, "style": "external", "pin": 5 },
+    { "cmd": "run",   "cycles": 0 }
+  ]
+}

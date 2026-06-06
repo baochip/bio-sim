@@ -1,6 +1,6 @@
 {
   "fclk_mhz": 350,
-  "firmware": "blink.bin",
+  "firmware": "sw/blink/blink.bin",
   "load_core": 0,
   "registers": [
     { "name": "sfr_config",  "value": "0x000" },
@@ -13,6 +13,6 @@
     { "signal": "gpio_dir", "bit": 21 },
     { "signal": "irq" }
   ],
-  "run":   { "max_cycles": 2000000, "stop_on_trap": true },
-  "trace": { "file": "hello.fst", "format": "fst" }
+  "run":   { "max_cycles": 100000, "stop_on_trap": true },
+  "trace": { "file": "hello-world.fst", "format": "fst" }
 }

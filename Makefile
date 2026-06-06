@@ -25,7 +25,8 @@ VFLAGS = --cc --exe --build -j 0 \
          -Wno-UNOPTFLAT -Wno-TIMESCALEMOD \
          -Wno-STMTDLY
 
-CFLAGS_EXTRA = -std=c++17 -I$(CURDIR)/sim
+CFLAGS_EXTRA = -std=c++17 -pthread -I$(CURDIR)/sim
+LDFLAGS_EXTRA = -pthread
 
 .PHONY: all build run clean json
 
@@ -43,6 +44,7 @@ build: $(JSON)
 	  -f rtl.f \
 	  $(CURDIR)/sim/sim_main.cpp \
 	  --CFLAGS "$(CFLAGS_EXTRA)" \
+	  --LDFLAGS "$(LDFLAGS_EXTRA)" \
 	  -Mdir $(BUILD) -o bio_sim
 
 # usage: make run CONFIG=configs/smoke.json
