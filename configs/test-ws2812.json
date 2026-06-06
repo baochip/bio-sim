@@ -1,0 +1,21 @@
+{
+  "fclk_mhz": 350,
+  "trace": { "file": "ws2812.fst" },
+  "commands": [
+    { "cmd": "load",    "core": 0, "bin": "sw/test-ws2812/test-ws2812.bin" },
+    { "cmd": "poke",    "name": "sfr_config", "value": "0x000" },
+    {
+      "cmd": "clock",
+      "core": 0,
+      "style": "int",
+      "freq_hz": 6666667
+    },
+    { "cmd": "fifo_event", "fifo": 1, "slot": 0, "level": 1,
+      "less_than": false, "greater_than": true, "equal_to": true },
+    { "cmd": "start",   "cores": [0] },
+    { "cmd": "fifo_write", "bank": 1, "data": [2] },
+    { "cmd": "fifo_write", "bank": 1, "data": [3] },
+    { "cmd": "fifo_write", "bank": 1, "data": ["0x8000FF00", "0x81FF0000", "0x820000FF"] },
+    { "cmd": "run",     "cycles": 300000, "stop_on_trap": false }
+  ]
+}

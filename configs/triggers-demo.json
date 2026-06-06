@@ -1,0 +1,21 @@
+{
+  "fclk_mhz": 700,
+  "trace": { "file": "triggers.fst" },
+  "commands": [
+    { "cmd": "load",  "core": 0, "bin": "uart.bin" },
+    { "cmd": "clock", "core": 0, "style": "frac", "freq_hz": 1843200 },
+
+    { "cmd": "io_config", "mode": "overwrite",
+      "oe_inv": "0x00000000", "sync_bypass": "0x00000002",
+      "snap_inputs": 0 },
+
+    { "cmd": "fifo_event", "fifo": 1, "slot": 0, "level": 1,
+      "less_than": false, "greater_than": true, "equal_to": true },
+
+    { "cmd": "irq", "which": 0, "edge_triggered": true, "mask": "0x04000000" },
+
+    { "cmd": "start", "cores": [0] },
+    { "cmd": "monitor", "signal": "irq" },
+    { "cmd": "run", "cycles": 100000, "stop_on_trap": false }
+  ]
+}

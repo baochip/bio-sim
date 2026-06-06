@@ -15,13 +15,13 @@ VFLAGS = --cc --exe --build -j 0 \
          --timescale-override 1ps/1ps \
          --top-module $(TOP) \
          +define+SIM \
-		 +define+USE_OSS_BRIDGE \
+         +define+USE_OSS_BRIDGE \
          -Wno-fatal \
- 		 -Wno-BLKANDNBLK \
-		 -Wno-WIDTH \
-		 -Wno-COMBDLY \
-		 -Wno-CASEINCOMPLETE \
-		 --no-timing \
+         -Wno-BLKANDNBLK \
+         -Wno-WIDTH \
+         -Wno-COMBDLY \
+         -Wno-CASEINCOMPLETE \
+         --no-timing \
          -Wno-UNOPTFLAT -Wno-TIMESCALEMOD \
          -Wno-STMTDLY
 
