@@ -9,6 +9,12 @@ RTL is used unmodified and built with `+define+SIM`.
 
 Build the container locally: `podman build -t bio-sim .`
 
+**or**
+
+Install the container:
+  - from GHCR: `podman pull ghcr.io/baochip/bio-sim:latest`
+  - from Baochip self-hosted: `curl -fsSL https://baochip.com/cdn/bio-sim-latest-x86_64.tar.gz | podman load`
+
 Run the container: `./container-run configs/smoke.json`
 
 - `--rebuild` will rebuild the container
@@ -278,3 +284,7 @@ host. `container-run` auto-detects the `"port"` from the config and publishes
 it; pass `--port N` to override. Confirm the right binary is running by the
 banner: `realtime` greets with `# bio-sim ready`, `driven` with
 `# bio-sim ready (driven)`.
+
+## AI Usage Notice
+
+This tool was developed with a lot of assistance from Claude Opus 4.8 High
