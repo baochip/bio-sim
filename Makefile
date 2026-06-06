@@ -54,3 +54,10 @@ run: build
 
 clean:
 	rm -rf $(BUILD)
+
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+
+release: ## Export image as a tar.gz for CDN hosting
+	podman save bio-sim:latest | gzip > bio-sim-$(VERSION)-$(shell uname -m).tar.gz
+	@echo "Upload bio-sim-$(VERSION)-$(shell uname -m).tar.gz to your CDN"
+	@echo "Users install with: curl -fsSL https://baochip.com/cdn/bio-sim-$(VERSION)-linux-amd64.tar.gz | podman load"
