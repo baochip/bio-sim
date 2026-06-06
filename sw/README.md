@@ -20,7 +20,7 @@ by WSL1.
 
 #### Building Rust assembly from C
 
-- `cd libs/bio-lib/src/c`
+- `cd sw` (this directory)
 - `zig build -Dmodule=<program>` or `python3 -m ziglang build "-Dmodule=<program>"`, depending on your zig install method
 
 The above script will automatically scan for the C source, compile it into a clang assembly intermediate,
