@@ -7,6 +7,9 @@ RTL is used unmodified and built with `+define+SIM`.
 
 ## Build & run with containers
 
+The instructions here default to using `podman` but they *should* work identically with
+`docker`. `podman` is preferred here as nothing in this repo requires root privileges.
+
 Build the container locally: `podman build -t bio-sim .`
 
 **or**
