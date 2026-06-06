@@ -2,25 +2,10 @@
 
 #include "bio.h" // this must always be first
 
-#define SAO_GPIO1 21
-#define SAO_GPIO2 22
-#define SAO_GPIO3 30
-#define SAO_GPIO4 31
-
-#define QUANTUM_PER_MS 1000 // assumes `--quantum 1MHz` passed as part of init
-// gpio config assumes `--sao 1,3`
-
-#define FIFO3_EMPTY_MASK FIFO_EVENT_MASK(3, 0)
-#define FIFO3_AVAILABLE_MASK FIFO_EVENT_MASK(3, 1)
-
-/* --- Tunables ---------------------------------------------------------- */
-#define DEPTH               32
-#define TOUCH_MARGIN        2
-#define DEBOUNCE_COUNT      100
-/* ----------------------------------------------------------------------- */
+#define GPIO_PIN 21
 
 void main(void) {
-    uint32_t output_mask = 1 << SAO_GPIO1;
+    uint32_t output_mask = 1 << GPIO_PIN;
 
     set_gpio_mask(output_mask);
     set_output_pins(output_mask);
