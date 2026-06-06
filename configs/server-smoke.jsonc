@@ -1,0 +1,10 @@
+// Pure socket connectivity test: no firmware, no core -- just open the driven
+// serve socket. A successful connect + "# bio-sim ready (driven)" banner proves
+// the socket/port path works. (With no core running, fifo3 stays empty, so the
+// client will report 0 samples -- that's expected; this only tests transport.)
+{
+  "fclk_mhz": 700,
+  "commands": [
+    { "cmd": "serve", "port": 5555, "mode": "driven" }
+  ]
+}
