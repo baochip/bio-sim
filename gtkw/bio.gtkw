@@ -1,0 +1,147 @@
+[*]
+[*] GTKWave Analyzer v3.4.0 (w)1999-2022 BSI
+[*] Sat Jun  6 10:59:50 2026
+[*]
+[dumpfile] "/mnt/f/code/bio-sim/ws2812.fst"
+[dumpfile_mtime] "Sat Jun  6 10:58:59 2026"
+[dumpfile_size] 1673226
+[savefile] "/mnt/f/code/bio-sim/bio.gtkw"
+[timestart] 1429
+[size] 2018 1526
+[pos] -1 -1
+*-22.523767 22040000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] TOP.
+[treeopen] TOP.bio_bdma_wrapper.
+[treeopen] TOP.bio_bdma_wrapper.bio_bdma.
+[treeopen] TOP.bio_bdma_wrapper.bio_bdma.fifos[0].
+[treeopen] TOP.bio_bdma_wrapper.bio_bdma.fifos[1].
+[treeopen] TOP.bio_bdma_wrapper.bio_bdma.fifos[2].
+[treeopen] TOP.bio_bdma_wrapper.bio_bdma.fifos[3].
+[treeopen] TOP.bio_bdma_wrapper.bio_bdma.mach[0].
+[treeopen] TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.
+[treeopen] TOP.bio_bdma_wrapper.bio_bdma.mach_to_fifo[0].
+[sst_width] 336
+[signals_width] 222
+[sst_expanded] 1
+[sst_vpaned_height] 1009
+@28
+TOP.bio_bdma_wrapper.bio_bdma.aclk
+TOP.bio_bdma_wrapper.bio_bdma.reset_n
+@200
+-gpio
+@22
+TOP.gpio_dir[31:0]
+TOP.gpio_in[31:0]
+@c00023
+TOP.gpio_out[31:0]
+@29
+(0)TOP.gpio_out[31:0]
+(1)TOP.gpio_out[31:0]
+(2)TOP.gpio_out[31:0]
+(3)TOP.gpio_out[31:0]
+(4)TOP.gpio_out[31:0]
+(5)TOP.gpio_out[31:0]
+(6)TOP.gpio_out[31:0]
+(7)TOP.gpio_out[31:0]
+(8)TOP.gpio_out[31:0]
+(9)TOP.gpio_out[31:0]
+(10)TOP.gpio_out[31:0]
+(11)TOP.gpio_out[31:0]
+(12)TOP.gpio_out[31:0]
+(13)TOP.gpio_out[31:0]
+(14)TOP.gpio_out[31:0]
+(15)TOP.gpio_out[31:0]
+(16)TOP.gpio_out[31:0]
+(17)TOP.gpio_out[31:0]
+(18)TOP.gpio_out[31:0]
+(19)TOP.gpio_out[31:0]
+(20)TOP.gpio_out[31:0]
+(21)TOP.gpio_out[31:0]
+(22)TOP.gpio_out[31:0]
+(23)TOP.gpio_out[31:0]
+(24)TOP.gpio_out[31:0]
+(25)TOP.gpio_out[31:0]
+(26)TOP.gpio_out[31:0]
+(27)TOP.gpio_out[31:0]
+(28)TOP.gpio_out[31:0]
+(29)TOP.gpio_out[31:0]
+(30)TOP.gpio_out[31:0]
+(31)TOP.gpio_out[31:0]
+@1401201
+-group_end
+@200
+-cpu0 state
+@22
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cpu_state[7:0]
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.dbg_pc[11:0]
+@820
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.dbg_ascii_instr[63:0]
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cached_ascii_instr[63:0]
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.dbg_ascii_state[127:0]
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.new_ascii_instr[63:0]
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.q_ascii_instr[63:0]
+@22
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cpuregs_raddr1[5:0]
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cpuregs_raddr2[5:0]
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cpuregs_rdata1[31:0]
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cpuregs_rdata2[31:0]
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cpuregs_waddr[5:0]
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cpuregs_wrdata[31:0]
+@28
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cpuregs_write
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.quanta_halt
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].clk_divider.penable
+@200
+-fifo0
+@22
+TOP.bio_bdma_wrapper.bio_bdma.fifos[0].regfifo.level[3:0]
+TOP.bio_bdma_wrapper.bio_bdma.fifos[0].regfifo.rdata[31:0]
+@28
+TOP.bio_bdma_wrapper.bio_bdma.fifos[0].regfifo.re
+TOP.bio_bdma_wrapper.bio_bdma.fifos[0].regfifo.readable
+@22
+TOP.bio_bdma_wrapper.bio_bdma.fifos[0].regfifo.wdata[31:0]
+@28
+TOP.bio_bdma_wrapper.bio_bdma.fifos[0].regfifo.we
+TOP.bio_bdma_wrapper.bio_bdma.fifos[0].regfifo.writable
+@200
+-fifo1
+@22
+TOP.bio_bdma_wrapper.bio_bdma.fifos[1].regfifo.level[3:0]
+TOP.bio_bdma_wrapper.bio_bdma.fifos[1].regfifo.rdata[31:0]
+@28
+TOP.bio_bdma_wrapper.bio_bdma.fifos[1].regfifo.re
+TOP.bio_bdma_wrapper.bio_bdma.fifos[1].regfifo.readable
+@22
+TOP.bio_bdma_wrapper.bio_bdma.fifos[1].regfifo.wdata[31:0]
+@28
+TOP.bio_bdma_wrapper.bio_bdma.fifos[1].regfifo.we
+TOP.bio_bdma_wrapper.bio_bdma.fifos[1].regfifo.writable
+@200
+-fifo2
+@22
+TOP.bio_bdma_wrapper.bio_bdma.fifos[2].regfifo.level[3:0]
+TOP.bio_bdma_wrapper.bio_bdma.fifos[2].regfifo.rdata[31:0]
+@28
+TOP.bio_bdma_wrapper.bio_bdma.fifos[2].regfifo.re
+TOP.bio_bdma_wrapper.bio_bdma.fifos[2].regfifo.readable
+@22
+TOP.bio_bdma_wrapper.bio_bdma.fifos[2].regfifo.wdata[31:0]
+@28
+TOP.bio_bdma_wrapper.bio_bdma.fifos[2].regfifo.we
+TOP.bio_bdma_wrapper.bio_bdma.fifos[2].regfifo.writable
+@200
+-fifo3
+@22
+TOP.bio_bdma_wrapper.bio_bdma.fifos[3].regfifo.level[3:0]
+TOP.bio_bdma_wrapper.bio_bdma.fifos[3].regfifo.rdata[31:0]
+@28
+TOP.bio_bdma_wrapper.bio_bdma.fifos[3].regfifo.re
+TOP.bio_bdma_wrapper.bio_bdma.fifos[3].regfifo.readable
+@22
+TOP.bio_bdma_wrapper.bio_bdma.fifos[3].regfifo.wdata[31:0]
+@28
+TOP.bio_bdma_wrapper.bio_bdma.fifos[3].regfifo.we
+TOP.bio_bdma_wrapper.bio_bdma.fifos[3].regfifo.writable
+[pattern_trace] 1
+[pattern_trace] 0
