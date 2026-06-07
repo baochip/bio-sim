@@ -6,6 +6,7 @@ import socket
 import select
 import sys
 import time
+import signal
 
 # This requires a GTKwave built from https://github.com/baochip/gtkwave/tree/udp-send
 
@@ -24,12 +25,21 @@ def parse_args():
     )
     return parser.parse_args()
 
+def _graceful_quit(signum, frame):
+    try:
+        curses.endwin()
+    except Exception:
+        pass
+    sys.exit(0)
 
 def main(stdscr, args):
     curses.noecho()
     curses.cbreak()
     stdscr.keypad(True)
     stdscr.nodelay(True)
+
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _graceful_quit)
 
     udp_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
     udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -62,7 +72,7 @@ def main(stdscr, args):
                     strlen = data[1]
                     nstring = data[2:2 + strlen].decode('utf-8', errors='replace')
                     sigmatch = nstring.startswith(args.signal)
-                    if sigmatch:
+                    if sigmatch and string:
                         # Find the line number that contains this string
                         for index, line in enumerate(user_text):
                             if line.lower().lstrip().startswith(string.lower()):
