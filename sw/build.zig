@@ -19,15 +19,17 @@ pub fn build(b: *std.Build) void {
     // always emit binary for this variant of the script
     const emit_binary = true;
 
-    // -Demit-listing=true: also produce an objdump-style .dis listing next to
-    // the .bin/.rs. Off by default: unlike zig (used by the other two steps),
-    // the listing needs a RISC-V objdump (binutils-riscv64-*) that isn't
-    // guaranteed to be on every dev machine.
+    // -Demit-listing=<bool>: also produce an objdump-style .dis listing next to
+    // the .bin/.rs. On by default so every build yields the full artifact set
+    // (.bin/.rs/.dis) under one module root name. The listing needs a RISC-V
+    // objdump (binutils-riscv64-*); when none is found, clang2rustasm.py warns
+    // and skips the .dis rather than failing the build. Pass -Demit-listing=false
+    // to suppress it.
     const emit_listing = b.option(
         bool,
         "emit-listing",
-        "Also emit an objdump-style disassembly listing (requires riscv objdump)",
-    ) orelse false;
+        "Emit an objdump-style disassembly listing (default true; skipped if no riscv objdump)",
+    ) orelse true;
 
     const main_c_path = b.pathJoin(&.{ module_name, "main.c" });
 

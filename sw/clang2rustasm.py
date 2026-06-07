@@ -1550,7 +1550,7 @@ def find_objdump(explicit):
     for c in candidates:
         if c and shutil.which(c):
             return c
-    return explicit or candidates[0]   # return best guess for a useful error
+    return None
 
 
 def inject_start_label(asm_src, start_label):
@@ -1863,11 +1863,14 @@ def main():
 
         if args.emit_listing:
             objdump = find_objdump(args.objdump)
-            obj_out = os.path.join(args.zig_out, f"{args.module}_bio.o")
-            dis_out = os.path.join(out_dir, f"{args.module}.dis")
-            assemble_to_listing(asm_out, obj_out, dis_out, args.zig_exe, objdump, start_label)
-            print(f"  listing: {dis_out} (via {objdump})", file=sys.stderr)
-
+            if objdump is None:
+                print("  listing: skipped (.dis) - no RISC-V objdump found; "
+                      "install binutils-riscv64-* or pass --objdump", file=sys.stderr)
+            else:
+                obj_out = os.path.join(args.zig_out, f"{args.module}_bio.o")
+                dis_out = os.path.join(out_dir, f"{args.module}.dis")
+                assemble_to_listing(asm_out, obj_out, dis_out, args.zig_exe, objdump, start_label)
+                print(f"  listing: {dis_out} (via {objdump})", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
