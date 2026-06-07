@@ -3,7 +3,18 @@
 A Verilator harness for the `bio_bdma` block. The host CPU is not modelled;
 everything it would do (load code, poke control registers, start cores) is
 reduced to APB transactions on the block's slave ports, driven from C++. The
-RTL is used unmodified and built with `+define+SIM`.
+original ASIC RTL is used unmodified and built with `+define+SIM`.
+
+## Development Loop
+
+The basic development loop is:
+
+1. Write BIO program in sw/\<my-prog\>/main.c
+2. Build code with `python3 -m ziglang build "-Dmodule=<my-prog>"` inside `sw/`. See [Building](./README.md#building) for more.
+3. Configure simulation environment with jsonc file in configs/\<my-prog\>.jsonc See [Config syntax](./README.md#jsonc-config-file-grammar) for more.
+4. Simulate with `./container-run configs/<my-prog>.jsonc` (see [containers](./README.md#build--run-with-containers)) or `./simulate configs/<my-prog>.jsonc` (see [locally built](./README.md#build--run-locally---requires-a-compatible-local-verilator-install) verilator)
+5. (Optional) View waveforms with `python3 ./biowave.py <my-prog>`: requires a custom-built `gtkwave`
+6. Repeat steps 1, 2 & 4, and reload waveform in 5.
 
 ## Build & run with containers
 
@@ -22,6 +33,12 @@ Run the container: `./container-run configs/smoke.json`
 
 - `--rebuild` will rebuild the container
 - `--port` defines the port for connecting to clients
+
+### Maintainance Note
+
+To build a containe for the baochip CDN, run:
+
+`podman save bio-sim:latest | gzip > bio-sim-latest.tar.gz`
 
 ## Build & run locally - requires a compatible local Verilator install
 
@@ -107,9 +124,11 @@ Addressing configuration for axil_crossbar_addr instance TOP.bio_bdma_wrapper.bi
 [done] sim_time = 902496 ps  (0 cycles)
 ```
 
-## Hello World
+## The `blink` demo
 
-### Build the `blink` demo
+The `blink` demo is a simple program that toggles a GPIO on and off. This section walks through all the stages of building, simulating, and viewing waveforms.
+
+### Building
 
 #### Prerequisites
 
@@ -117,7 +136,7 @@ The C build system relies on Zig. You can get this via Python's `pip`, requiring
 
 `python3 -m pip install ziglang`
 
-#### Building
+#### Build
 
 Change to the `sw` directory, and run the build script:
 
@@ -142,20 +161,22 @@ Wrote blink\blink.rs
   instructions: 21
   functions found: 2 (_start, main)
   binary: blink\blink.bin (44 bytes / 11 words)
+  listing: blink\blink.dis (via riscv-none-elf-objdump)
 ```
 
-#### Simulating
+### Simulating
 
 Change back to the root directory, and run the simulation command:
 
-`./container-run configs/hello-world.jsonc`
+`./container-run configs/blink.jsonc`
 
 Example output:
 
 ```
 >> reusing image 'bio-sim'  (use --rebuild after editing rtl/ or sim/)
-[run] [##############################] 100%  100000/100000 cyc  129856 cyc/s  ETA 0s
-[trace] writing waveform/hello-world.fst
+>> reusing image 'bio-sim'  (use --rebuild after editing rtl/ or sim/)
+[run] [##############################] 100%  100000/100000 cyc  139256 cyc/s  ETA 0s
+[trace] writing waveform/blink.fst
 [cfg] fclk=350.000 MHz  pclk=fclk/8 (43.750 MHz)
 Addressing configuration for axil_crossbar_addr instance TOP.bio_bdma_wrapper.bio_bdma.axil_demux.axil_crossbar_wr_inst.s_ifaces[0].addr_inst
  0 ( 0): 40000000 / 29 -- 40000000-5fffffff
@@ -182,17 +203,129 @@ Addressing configuration for axil_crossbar_addr instance TOP.bio_bdma_wrapper.bi
 
 This example causes GPIO 21 to wiggle up and down, which you can see with the 0->1, 1->0 transition in the monitor output.
 
-However, you can get full-waveform visibility by installing gtkwave and looking at the `.fst` file output. Check out the [gtkwave](https://github.com/gtkwave/gtkwave) repository for instructions on how to install, and then invoke using the following command:
+### Viewing Waveforms
 
-`gtkwave waveform/hello-world.fst -a gtkw/bio.gtkw &`
+#### Web-Based `surfer` Viewer
 
-This will open up to a screen that looks like this:
+You can view the `blink.fst` waveform using the web-based [surfer](https://surfer-project.org/) viewer. Click the "three-bar menu" and do `File->Open` or type `ctrl-o` and upload `waveform/blink.fst`. Then, do `File->Load State...` and upload [`surfer/bio.surf.ron`](./surfer/bio.surf.ron) to display some starter waveforms.
 
-![hello world gtkwave example](docs/gtkw-hello-world.png)
+We do not currently have a `surfer` extension that supports code zooming.
 
-Right clicking and dragging will allow you to zoom into the waveform. The simulation is very detailed and contains the exact state of every signal inside the BIO for the duration of the simulation. For example, you can see the exact trace of instructions run by the CPU:
+#### Code Zoom with `gtkwave`
 
-![detail of hello world example](docs/gtkw-hello-detail.png)
+A custom-built `gtkwave` enables you to hover-zoom over the `dbg_pc` trace and correlate waveform position to assembly code in real time. Build our fork [from source](https://github.com/baochip/gtkwave), or you can try one of our [releases](https://github.com/baochip/gtkwave/releases) if you're on Linux or Windows.
+
+Start the viewer with `python3 ./biowave.py blink`; if you need to specify a path to the stand-alone binaries in the releases, use `python3 ./biowave.py blink --gtkwave-bin /path/to/gtkwave-x86_64.AppImage` (or `/path/to/gtkwave/bin/gtkwave.exe` for Windows).
+
+This will cause the terminal to run the `codezoom.py` script, and pop open the `gtkwave` viewer, like this:
+
+![blink gtkwave example](docs/gtkw-blink-codezoom.png)
+
+Left-clicking on the `dbg_pc` trace will cause the terminal to highlight the line of assembly code that corresponds to the current cursor position. Right-click drag will allow you to zoom in. Right click on a signal name and select "Open Scope" to find the location in the RTL hierarchy that corresponds to that signal.
+
+From there, you can search for more signals to view, and drag them into the waveform viewer if you need additional visibility into the machine state.
+
+# .jsonc config file grammar
+
+Config files in `configs/` are **JSONC** - standard JSON plus `//` line and `/* */` block comments (parsed with `ignore_comments=true`). The harness (`sim/sim_main.cpp`) reduces every config to an **ordered command list** run against the DUT. After reset it always runs a `sfr_cfginfo` self-test before executing commands.
+
+**Number format:** any numeric field accepts a JSON number *or* a string parsed base-0, so `41`, `"0x29"`, `"0o51"` are all valid.
+
+---
+
+## Top-level keys
+
+| Key | Meaning |
+|---|---|
+| `fclk_mhz` | Fast clock in MHz. Default `700`. |
+| `trace` | `{ file }` - enable FST waveform output. `file` default `"trace.fst"`. (A `format` field is accepted but ignored; output is always FST.) |
+| `sw` | Shorthand name `<n>`: auto-loads `sw/<n>/<n>.bin` and traces to `<n>.fst` (unless `trace` is given). |
+| `load_core` | Core for the auto-load. Default `0`. |
+| `commands` | Explicit ordered array of command objects (modern schema, below). |
+
+If `commands` is absent, the **legacy flat keys** are desugared into commands in this order: `monitor` → `load` (from `firmware`/`sw`) → `poke` (from `registers`) → `start` → `run`. With `commands` present, an `sw`/`firmware` load is prepended unless the array already contains a `load`.
+
+Legacy flat keys: `firmware` (path string → `load`), `registers` (array → `poke` each), `start` (object → `start`), `monitor` (array → `monitor` each), `run` (object → `run`).
+
+---
+
+## Commands
+
+Each entry in `commands` is an object with a `cmd` field. Unknown `cmd` values are warned and skipped.
+
+**Firmware & registers**
+- `load {core?, bin}` - load a `.bin` into a core's IMEM. `core` default `0`; bytes zero-padded to a word.
+- `poke {name|offset, value, port?}` - APB register write. Give register `name` (from the SFR map) and/or raw `offset`. `port` default `"sfr"`.
+- `peek {name|offset, port?}` - APB register read, logged.
+
+**FIFOs**
+- `fifo_write {bank, data:[…]|value, via?}` - push word(s) to a TX FIFO `bank`. `via` is `"sfr"` (default, main port) or `"alias"` (per-bank page).
+- `fifo_read {bank, count?, via?}` - pop word(s) from an RX FIFO. `count` default `1`.
+- `fifo_drain {bank, max?, via?}` - pop all available words (or up to `max`); prints each as hex and signed-16.
+
+**Cores & clocking**
+- `start {cores:[…], restart?, clkdiv_restart?}` - enable the listed cores via `sfr_ctrl`. `restart` and `clkdiv_restart` default `true`.
+- `clock {core, style?, …}` - set a core's clock divider. `core` is `0..3`. `style`:
+  - `"frac"` (default) / `"int"` - needs `freq_hz` (target Hz; `int` forbids the fractional part).
+  - `"fixed"` - needs `div_int`, optional `div_frac` (eighths of /256).
+  - `"external"` - needs `pin` (drive the core clock from a GPIO).
+
+**IO / events / interrupts**
+- `io_config {mode?, i_inv?, o_inv?, oe_inv?, sync_bypass?, snap_inputs?, snap_outputs?}` - only the fields you name are written. `mode` is `"overwrite"` (default), `"set"`, or `"clear"`. `snap_*` take a core index `0..3`. (`mapped` is accepted but ignored - it targets the external IOX mux, not this DUT.)
+- `fifo_event {fifo, slot?, level, less_than?, greater_than?, equal_to?}` - FIFO level-crossing trigger. `fifo` `0..3`, `slot` `0..1` (default `0`); comparison flags default `false`.
+- `irq {which, mask, edge_triggered?}` - set IRQ line `which` (`0..3`) to a raw 32-bit `mask`. `edge_triggered` default `false` (else level).
+
+**Stimulus & run control**
+- `inject {events:[{cycle, pin, value}, …]}` - schedule timestamped `gpio_in` edges (driven-mode style).
+- `monitor {signal, bit?}` - watch a top-level signal for edges; omit `bit` to watch the whole bus.
+- `serve {port?, mode?, wait_for_client?, max_cycles?, min_dwell?}` - open a TCP server for live socket interaction. `port` default `5555`; `wait_for_client` default `true`. `mode` is `"realtime"` (default; `max_cycles` default `0`=unbounded, `min_dwell` default `2000`) or `"driven"` (lock-step, deterministic; `max_cycles`/`min_dwell` ignored).
+- `run {cycles?|max_cycles?, stop_on_trap?}` - advance N fclk cycles (default `1000000`). `stop_on_trap` default `true`.
+- `delay {cycles?}` - same as `run` but never stops on trap.
+
+---
+
+## Register reference (poke / peek)
+
+`name` resolves against the SFR map; common entries: `sfr_ctrl` `0x00`, `sfr_cfginfo` `0x04` (RO), `sfr_config` `0x08`, `sfr_flevel` `0x0C` (RO), `sfr_txf0..3` `0x10..0x1C`, `sfr_rxf0..3` `0x20..0x2C` (RO), `sfr_qdiv0..3` `0x50..0x5C`, `sfr_extclock` `0x44`, `sfr_irqmask_0..3` `0x70..0x7C`. Writing a read-only register warns and is ignored by the RTL; a `name`/`offset` mismatch is an error.
+
+---
+
+## Example
+
+```jsonc
+{
+  "fclk_mhz": 350,
+  "firmware": "sw/blink/blink.bin",
+  "load_core": 0,
+  "registers": [
+    { "name": "sfr_config", "value": "0x000" },
+    { "name": "sfr_qdiv0",  "value": "0x00010000" },
+    { "offset": "0x6C", "value": "0x0", "port": "sfr" }  // sfr_io_i_inv
+  ],
+  "start":   { "cores": [0], "restart": true, "clkdiv_restart": true },
+  "monitor": [
+    { "signal": "gpio_out", "bit": 21 },
+    { "signal": "irq" }
+  ],
+  "run":   { "max_cycles": 100000, "stop_on_trap": true },
+  "trace": { "file": "hello-world.fst" }
+}
+```
+
+Equivalent using the modern `commands` array (with a `clock` and a live socket):
+
+```jsonc
+{
+  "fclk_mhz": 350,
+  "sw": "blink",            // auto-loads sw/blink/blink.bin
+  "commands": [
+    { "cmd": "clock", "core": 0, "style": "frac", "freq_hz": 1000000 },
+    { "cmd": "monitor", "signal": "gpio_out", "bit": 21 },
+    { "cmd": "start", "cores": [0] },
+    { "cmd": "serve", "port": 5555, "mode": "driven", "wait_for_client": true }
+  ]
+}
+```
 
 ## Serve modes (live socket interaction)
 
