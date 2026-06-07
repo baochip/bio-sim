@@ -225,6 +225,78 @@ Left-clicking on the `dbg_pc` trace will cause the terminal to highlight the lin
 
 From there, you can search for more signals to view, and drag them into the waveform viewer if you need additional visibility into the machine state.
 
+### The `test-ws2812` demo
+
+This demo works identically to `blink`, just replace `blink` with `test-ws2812`. This is a slightly more complicated program that simulates driving a WS2812 LED chain.
+
+### The `interactive` demo
+
+Build the `invert` program:
+
+```
+cd sw
+python3 -m ziglang build "-Dmodule=invert"
+```
+
+Start the `server` demo:
+
+`./container-run configs/server-demo.jsonc`
+
+This will result in an output that looks like this:
+
+```
+>> reusing image 'bio-sim'  (use --rebuild after editing rtl/ or sim/)
+>> auto-publishing serve port 5555 (from configs/server-demo.jsonc; override with --port)
+[trace] writing waveform/serve.fst
+[cfg] fclk=700.000 MHz  pclk=fclk/16 (43.750 MHz)
+Addressing configuration for axil_crossbar_addr instance TOP.bio_bdma_wrapper.bio_bdma.axil_demux.axil_crossbar_wr_inst.s_ifaces[0].addr_inst
+ 0 ( 0): 40000000 / 29 -- 40000000-5fffffff
+ 1 ( 0): 60000000 / 29 -- 60000000-7fffffff
+Addressing configuration for axil_crossbar_addr instance TOP.bio_bdma_wrapper.bio_bdma.axil_demux.axil_crossbar_rd_inst.s_ifaces[0].addr_inst
+ 0 ( 0): 40000000 / 29 -- 40000000-5fffffff
+ 1 ( 0): 60000000 / 29 -- 60000000-7fffffff
+[selftest] sfr_cfginfo @0x04 = 0x10000408 (expect 0x10000408) -> PASS
+[load] sw/invert/invert.bin -> core 0 (9 words)
+[clock] core 0 <= 10000000 Hz (frac)  div_int=70 div_frac=0  (qdiv=0x00460000)  actual=10000000 Hz (+0 ppm)
+[mon] watching gpio_out bit 1
+[mon] watching gpio_out bit 2
+[start] sfr_ctrl @0x00 <= 0x111 (en=0x1 restart=0x1 clkdiv=0x1)
+[serve] listening on 0.0.0.0:5555  (fclk=700000000 Hz)
+```
+
+At this point, the simulation is paused, waiting for a client to join.
+
+In another terminal, run the client program:
+
+`python3 clients/interactive.py`
+
+This will start an interaction that looks like the below. Use the space bar to toggle the pin, and control-C to exit the interaction:
+
+```
+connected to 127.0.0.1:5555, driving gpio_in[0]
+SPACE = toggle pin,  Ctrl-C = exit
+   <- # bio-sim ready
+   <- output: evt 87 gpio_out 1 1
+-> set gpio_in[0] = 1
+   <- output: evt 216486 gpio_out 1 0
+-> set gpio_in[0] = 0
+   <- output: evt 414219 gpio_out 1 1
+-> set gpio_in[0] = 1
+   <- output: evt 562902 gpio_out 1 0
+```
+
+You'll see the server responding with:
+
+```
+[mon] cyc=87 (2123436 ps)  gpio_out[1]: 0 -> 1
+[mon] cyc=216486 (311141208 ps)  gpio_out[1]: 1 -> 0
+[mon] cyc=414219 (593503932 ps)  gpio_out[1]: 0 -> 1
+```
+
+What's happening here is the space bar is injection simulation events into verilator, in "wall-clock time", and responding to it at the rate that the server can simulate (in this demo, it's running at about 10kHz).
+
+This mode is useful for stimulating truly asynchronous test cases.
+
 # .jsonc config file grammar
 
 Config files in `configs/` are **JSONC** - standard JSON plus `//` line and `/* */` block comments (parsed with `ignore_comments=true`). The harness (`sim/sim_main.cpp`) reduces every config to an **ordered command list** run against the DUT. After reset it always runs a `sfr_cfginfo` self-test before executing commands.
