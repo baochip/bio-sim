@@ -892,15 +892,38 @@ static void execute_command(Sim& sim, const json& c) {
     }
 }
 
-// Build the command list: explicit "commands" array, else desugar the legacy
-// flat schema into the same command sequence (so old configs are unchanged).
+// "sw":"<name>" is shorthand tying all artifacts to one root: firmware loads
+// from sw/<name>/<name>.bin and (see main) the trace lands at waveform/<name>.fst.
+// Returns "" when no "sw" key is present.
+static std::string sw_bin(const json& cfg) {
+    if (!cfg.contains("sw")) return "";
+    const std::string m = cfg["sw"].get<std::string>();
+    return "sw/" + m + "/" + m + ".bin";
+}
+
 static json build_commands(const json& cfg) {
-    if (cfg.contains("commands")) return cfg["commands"];
+    if (cfg.contains("commands")) {
+        json out = cfg["commands"];
+        // "sw" injects a load of sw/<name>/<name>.bin unless the config already
+        // carries an explicit "load" command, which always wins (the override).
+        if (cfg.contains("sw")) {
+            bool has_load = false;
+            for (const auto& c : out)
+                if (c.value("cmd", std::string("")) == "load") { has_load = true; break; }
+            if (!has_load) {
+                json ld; ld["cmd"]="load"; ld["core"]=cfg.value("load_core",0);
+                ld["bin"]=sw_bin(cfg);
+                out.insert(out.begin(), ld);
+            }
+        }
+        return out;
+    }
     json out = json::array();
     if (cfg.contains("monitor"))
         for (auto& m : cfg["monitor"]) { json c=m; c["cmd"]="monitor"; out.push_back(c); }
-    if (cfg.contains("firmware")) {
-        json c; c["cmd"]="load"; c["core"]=cfg.value("load_core",0); c["bin"]=cfg["firmware"];
+    if (cfg.contains("firmware") || cfg.contains("sw")) {
+        json c; c["cmd"]="load"; c["core"]=cfg.value("load_core",0);
+        c["bin"]= cfg.contains("firmware") ? cfg["firmware"].get<std::string>() : sw_bin(cfg);
         out.push_back(c);
     }
     if (cfg.contains("registers"))
@@ -934,7 +957,8 @@ int main(int argc, char** argv) {
     Sim sim(&ctx, fclk_mhz);
     if (cfg.contains("trace"))
         sim.open_trace(cfg["trace"].value("file", std::string("trace.fst")));
-    printf("[cfg] fclk=%.3f MHz  pclk=fclk/%u (%.3f MHz)\n",
+    else if (cfg.contains("sw"))
+        sim.open_trace(cfg["sw"].get<std::string>() + ".fst");    printf("[cfg] fclk=%.3f MHz  pclk=fclk/%u (%.3f MHz)\n",
            fclk_mhz, sim.pclk_div, fclk_mhz/sim.pclk_div);
 
     sim.reset();

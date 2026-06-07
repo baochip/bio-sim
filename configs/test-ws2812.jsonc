@@ -1,9 +1,8 @@
 {
   // This is the frequency found on baosec targets. Dabao targets run at 700 MHz by default.
   "fclk_mhz": 350,
-  "trace": { "file": "ws2812.fst" },
+  "sw": "test-ws2812",
   "commands": [
-    { "cmd": "load",    "core": 0, "bin": "sw/test-ws2812/test-ws2812.bin" },
     { "cmd": "poke",    "name": "sfr_config", "value": "0x000" },
     // Sets up the clock frequency to that required by the simulation.
     {
