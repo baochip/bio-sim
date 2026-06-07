@@ -1,15 +1,15 @@
 [*]
 [*] GTKWave Analyzer v3.4.0 (w)1999-2022 BSI
-[*] Sat Jun  6 10:59:50 2026
+[*] Sun Jun  7 06:10:26 2026
 [*]
-[dumpfile] "/mnt/f/code/bio-sim/ws2812.fst"
-[dumpfile_mtime] "Sat Jun  6 10:58:59 2026"
-[dumpfile_size] 1673226
-[savefile] "/mnt/f/code/bio-sim/bio.gtkw"
-[timestart] 1429
+[dumpfile] "/mnt/f/code/bio-sim/waveform/i2s.fst"
+[dumpfile_mtime] "Sat Jun  6 17:20:56 2026"
+[dumpfile_size] 7736600
+[savefile] "/mnt/f/code/bio-sim/gtkw/bio.gtkw"
+[timestart] 1900000
 [size] 2018 1526
 [pos] -1 -1
-*-22.523767 22040000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+*-18.762217 2593962 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
 [treeopen] TOP.
 [treeopen] TOP.bio_bdma_wrapper.
 [treeopen] TOP.bio_bdma_wrapper.bio_bdma.
@@ -32,9 +32,9 @@ TOP.bio_bdma_wrapper.bio_bdma.reset_n
 @22
 TOP.gpio_dir[31:0]
 TOP.gpio_in[31:0]
-@c00023
+@c00022
 TOP.gpio_out[31:0]
-@29
+@28
 (0)TOP.gpio_out[31:0]
 (1)TOP.gpio_out[31:0]
 (2)TOP.gpio_out[31:0]
@@ -67,15 +67,23 @@ TOP.gpio_out[31:0]
 (29)TOP.gpio_out[31:0]
 (30)TOP.gpio_out[31:0]
 (31)TOP.gpio_out[31:0]
-@1401201
+@1401200
 -group_end
 @200
 -cpu0 state
 @22
 TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cpu_state[7:0]
+@8022
 TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.dbg_pc[11:0]
-@820
+@20000
+-
+-
+-
+@22
+TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.dbg_pc[11:0]
+@821
 TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.dbg_ascii_instr[63:0]
+@820
 TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.cached_ascii_instr[63:0]
 TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.dbg_ascii_state[127:0]
 TOP.bio_bdma_wrapper.bio_bdma.mach[0].core.new_ascii_instr[63:0]
