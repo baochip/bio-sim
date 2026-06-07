@@ -60,6 +60,12 @@ def main() -> int:
     parser.add_argument("--dis", help="override the disassembly path")
     parser.add_argument("--gtkw", help="override the gtkw layout path")
     parser.add_argument(
+        "--gtkwave-bin",
+        default=None,
+        help="path to a gtkwave binary (e.g. a downloaded AppImage or mingw "
+             "build not yet on PATH); defaults to searching PATH for 'gtkwave'",
+    )
+    parser.add_argument(
         "--codezoom",
         default="./codezoom.py",
         help="path to codezoom.py (default ./codezoom.py)",
@@ -83,8 +89,9 @@ def main() -> int:
 
     # 1. gtkwave in the background. It's a GUI, so send its chatter to the void
     #    rather than to the terminal where it would corrupt codezoom's display.
+    gtkwave_bin = args.gtkwave_bin or "gtkwave"
     gtkwave = subprocess.Popen(
-        ["gtkwave", str(fst), "-a", str(gtkw), "-u", f"127.0.0.1:{args.port}"],
+        [gtkwave_bin, str(fst), "-a", str(gtkw), "-u", f"127.0.0.1:{args.port}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
