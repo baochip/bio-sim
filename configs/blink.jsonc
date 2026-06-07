@@ -1,0 +1,17 @@
+{
+  "fclk_mhz": 350,
+  "sw": "blink",
+  "load_core": 0,
+  "registers": [
+    { "name": "sfr_config",  "value": "0x000" },
+    { "name": "sfr_qdiv0",   "value": "0x00010000" },
+    { "offset": "0x6C", "value": "0x00000000", "port": "sfr" }
+  ],
+  "start": { "cores": [0], "restart": true, "clkdiv_restart": true },
+  "monitor": [
+    { "signal": "gpio_out", "bit": 21 },
+    { "signal": "gpio_dir", "bit": 21 },
+    { "signal": "irq" }
+  ],
+  "run":   { "max_cycles": 100000, "stop_on_trap": true }
+}
