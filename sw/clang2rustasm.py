@@ -116,6 +116,17 @@ def parse_args():
         metavar="PATH",
         help="Path to the zig executable used for assembling the binary (default: zig)",
     )
+    parser.add_argument(
+        "--emit-listing",
+        action="store_true",
+        help="Also emit an objdump-style disassembly listing (<module>/<module>.dis)",
+    )
+    parser.add_argument(
+        "--objdump",
+        default=None,
+        metavar="PATH",
+        help="RISC-V objdump for --emit-listing (default: auto-detect riscv64-*-objdump)",
+    )
     return parser.parse_args()
 
 
@@ -1525,12 +1536,89 @@ def format_asm_output(fn_name, converted_lines, data_objects, label_map):
     return "\n".join(parts) + "\n"
 
 
+def find_objdump(explicit):
+    """Locate a RISC-V objdump. Honors --objdump, else tries common names."""
+    import shutil
+    candidates = [explicit] if explicit else [
+        "riscv-none-elf-objdump",      # xpack objdump
+        "riscv64-unknown-elf-objdump", # ubuntu-native installs
+        "riscv32-unknown-elf-objdump",
+        "riscv64-linux-gnu-objdump",   # the binutils-riscv64-linux-gnu package
+        "riscv64-elf-objdump",
+        "llvm-objdump",                # last resort; format differs slightly
+    ]
+    for c in candidates:
+        if c and shutil.which(c):
+            return c
+    return explicit or candidates[0]   # return best guess for a useful error
+
+
+def inject_start_label(asm_src, start_label):
+    """
+    Insert a global <start_label> at .text offset 0 so the objdump listing
+    header reads `<start_label>:` instead of `<.text>`. Anchor: the code-section
+    .p2align that immediately follows the .option preamble.
+    """
+    lines = asm_src.splitlines()
+    out, inserted = [], False
+    for i, line in enumerate(lines):
+        out.append(line)
+        if (not inserted
+                and line.strip().startswith(".p2align")
+                and i >= 1 and lines[i - 1].strip().startswith(".option")):
+            out.append(f"    .globl {start_label}")
+            out.append(f"{start_label}:")
+            inserted = True
+    if not inserted:                    # fallback: prepend a labeled section
+        out = ["    .section .text",
+               f"    .globl {start_label}",
+               f"{start_label}:"] + lines
+    return "\n".join(out) + "\n"
+
+
+def assemble_to_listing(asm_path, obj_path, dis_path, zig_exe, objdump_exe, start_label):
+    """
+    Assemble the errata-patched .s into a *relocatable* ELF object (symbols
+    preserved, unlike the flat binary) and disassemble it into an objdump-style
+    listing.
+
+      * Relocatable object => .text VMA 0 => zero-based addresses with
+        in-section branch/jump targets resolved symbolically.
+      * Unlike assemble_to_binary, we pass +zmmul+c in -mcpu. The C-extension
+        must be recorded in .riscv.attributes or objdump renders compressed
+        instructions as ".insn 2, 0x...." instead of j/beqz/slli/etc.
+    """
+    import subprocess
+    with open(asm_path) as f:
+        labeled = inject_start_label(f.read(), start_label)
+    labeled_path = obj_path[:-2] + "_lst.s"     # zig-out/<module>_bio_lst.s
+    with open(labeled_path, "w") as f:
+        f.write(labeled)
+
+    asm_cmd = [
+        zig_exe, "cc", "-target", "riscv32-freestanding",
+        "-mcpu=generic_rv32+zmmul+c",           # +c so objdump decodes compressed
+        "-nostdlib", "-c", "-o", obj_path, labeled_path,
+    ]
+    r = subprocess.run(asm_cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stderr, file=sys.stderr)
+        sys.exit(f"[ERROR] Listing assembly failed for {labeled_path}")
+
+    r = subprocess.run([objdump_exe, "-d", obj_path], capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stderr, file=sys.stderr)
+        sys.exit(f"[ERROR] objdump failed ({objdump_exe}); is binutils-riscv64-* installed?")
+    with open(dis_path, "w") as f:
+        f.write(r.stdout)
+
+
 def assemble_to_binary(asm_path, ld_path, bin_path, zig_exe):
     """
     Assemble + link the generated .s file into a flat binary using zig cc.
 
     The linker script uses OUTPUT_FORMAT(binary) so lld writes the flat image
-    directly — no objcopy step needed.  Origin 0x0, max code size 0xF00 bytes
+    directly - no objcopy step needed.  Origin 0x0, max code size 0xF00 bytes
     (stack occupies 0xF00-0xFFF, 256 bytes, growing downward from 0x1000).
     """
     import subprocess
@@ -1758,18 +1846,27 @@ def main():
         for warning in WARNINGS:
             print(warning)
 
-    if args.emit_binary:
+    if args.emit_binary or args.emit_listing:
         asm_content = format_asm_output(fn_name, converted, data_objects, label_map)
         asm_out  = os.path.join(args.zig_out, f"{args.module}_bio.s")
-        ld_out   = os.path.join(args.zig_out, f"{args.module}_bio.ld")
-        # Place the binary alongside the Rust output file
+        # Place generated artifacts alongside the Rust output file
         out_dir  = os.path.dirname(output_path) or "."
-        bin_out  = os.path.join(out_dir, f"{args.module}.bin")
         with open(asm_out, "w") as f:
             f.write(asm_content)
-        assemble_to_binary(asm_out, ld_out, bin_out, args.zig_exe)
-        bin_bytes = os.path.getsize(bin_out)
-        print(f"  binary: {bin_out} ({bin_bytes} bytes / {bin_bytes // 4} words)", file=sys.stderr)
+
+        if args.emit_binary:
+            ld_out  = os.path.join(args.zig_out, f"{args.module}_bio.ld")
+            bin_out = os.path.join(out_dir, f"{args.module}.bin")
+            assemble_to_binary(asm_out, ld_out, bin_out, args.zig_exe)
+            bin_bytes = os.path.getsize(bin_out)
+            print(f"  binary: {bin_out} ({bin_bytes} bytes / {bin_bytes // 4} words)", file=sys.stderr)
+
+        if args.emit_listing:
+            objdump = find_objdump(args.objdump)
+            obj_out = os.path.join(args.zig_out, f"{args.module}_bio.o")
+            dis_out = os.path.join(out_dir, f"{args.module}.dis")
+            assemble_to_listing(asm_out, obj_out, dis_out, args.zig_exe, objdump, start_label)
+            print(f"  listing: {dis_out} (via {objdump})", file=sys.stderr)
 
 
 if __name__ == "__main__":

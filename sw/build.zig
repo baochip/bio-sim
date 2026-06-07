@@ -19,6 +19,16 @@ pub fn build(b: *std.Build) void {
     // always emit binary for this variant of the script
     const emit_binary = true;
 
+    // -Demit-listing=true: also produce an objdump-style .dis listing next to
+    // the .bin/.rs. Off by default: unlike zig (used by the other two steps),
+    // the listing needs a RISC-V objdump (binutils-riscv64-*) that isn't
+    // guaranteed to be on every dev machine.
+    const emit_listing = b.option(
+        bool,
+        "emit-listing",
+        "Also emit an objdump-style disassembly listing (requires riscv objdump)",
+    ) orelse false;
+
     const main_c_path = b.pathJoin(&.{ module_name, "main.c" });
 
     // -- Step 1: emit assembly ----------------------------------------
@@ -74,11 +84,13 @@ pub fn build(b: *std.Build) void {
     });
     py_cmd.has_side_effects = true;
     if (emit_binary) {
-        py_cmd.addArgs(&.{
-            "--emit-binary",
-            "--zig-exe",
-            b.graph.zig_exe,
-        });
+        py_cmd.addArg("--emit-binary");
+    }
+    if (emit_listing) {
+        py_cmd.addArg("--emit-listing");
+    }
+    if (emit_binary or emit_listing) {
+        py_cmd.addArgs(&.{ "--zig-exe", b.graph.zig_exe });
     }
     py_cmd.step.dependOn(&install_dis.step);
 
