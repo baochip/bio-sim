@@ -37,7 +37,7 @@ Run the container: `./container-run configs/smoke.json`
 
 ### Maintainance Note
 
-To build a containe for the baochip CDN, run:
+To build a container for the baochip CDN, run:
 
 `podman save bio-sim:latest | gzip > bio-sim-latest.tar.gz`
 
