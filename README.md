@@ -15,6 +15,7 @@ The basic development loop is:
 4. Simulate with `./container-run configs/<my-prog>.jsonc` (see [containers](./README.md#build--run-with-containers)) or `./simulate configs/<my-prog>.jsonc` (see [locally built](./README.md#build--run-locally---requires-a-compatible-local-verilator-install) verilator)
 5. (Optional) View waveforms with `python3 ./biowave.py <my-prog>`: requires a custom-built `gtkwave`
 6. Repeat steps 1, 2 & 4, and reload waveform in 5.
+7. Load your code onto actual hardware. For `Dabao`, see [bio-loader](https://github.com/baochip/bio-loader); requires the latest `dabao-console` version.
 
 ## Build & run with containers
 
