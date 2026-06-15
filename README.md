@@ -30,7 +30,7 @@ Install the container:
   - from GHCR: `podman pull ghcr.io/baochip/bio-sim:latest`
   - from Baochip self-hosted: `curl -fsSL https://baochip.com/cdn/bio-sim-latest-x86_64.tar.gz | podman load`
 
-Run the container: `./container-run configs/smoke.json`
+Run the container: `./container-run configs/smoke.jsonc`
 
 - `--rebuild` will rebuild the container
 - `--port` defines the port for connecting to clients
@@ -45,9 +45,9 @@ To build a container for the baochip CDN, run:
 
 ```bash
 make build                     # fetches json.hpp, runs verilator, compiles
-make run CONFIG=configs/smoke.json
+make run CONFIG=configs/smoke.jsonc
 # or:
-./simulate configs/smoke.json
+./simulate configs/smoke.jsonc
 ```
 
 `make build` depends on the single-header `nlohmann/json` into `sim/json.hpp`
@@ -101,7 +101,7 @@ executable.
 
 ## Smoke Test
 
-`configs/smoke.json` runs no firmware. After reset the harness reads
+`configs/smoke.jsonc` runs no firmware. After reset the harness reads
 `sfr_cfginfo` at offset `0x04` over the main APB port and checks it equals
 `0x10000408` (the register hardwires `{16'd4096, 8'd4, 8'd8}`). A `PASS`
 confirms that the build resolved, the clocking/reset are sane, and the APB transactor
