@@ -202,7 +202,7 @@ def extract_all_code(lines):
     in_code_section = False
     in_function = False
 
-    skip_in_body = {".globl", ".type ", ".size ", ".p2align", ".cfi_startproc"}
+    skip_in_body = {".globl", ".type ", ".size ", ".p2align", ".cfi"}
 
     for line in lines:
         stripped = line.strip()
