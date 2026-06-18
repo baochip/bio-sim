@@ -12,10 +12,10 @@ void main(void) {
 
     clear_gpio_pins_n(!output_mask); // drives it low
     while (1) {
-        for(int i = 0; i < 2000; i++) {
+        for(int i = 0; i < 10; i++) {
             set_gpio_pins(output_mask);
         }
-        for(int i = 0; i < 2000; i++) {
+        for(int i = 0; i < 10; i++) {
             clear_gpio_pins_n(!output_mask); // drives the pin low
         }
     }
