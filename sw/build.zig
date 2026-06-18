@@ -104,6 +104,20 @@ pub fn build(b: *std.Build) void {
         b.default_step.dependOn(&install_dis.step);
     } else {
         b.default_step.dependOn(&py_cmd.step);
+
+        // Step 2b: rewrite ABI register names in the .dis listing.
+        if (emit_listing) {
+            const dis_path = b.pathFromRoot(b.fmt("{s}/{s}.dis", .{ module_name, module_name }));
+            const regs_cmd = b.addSystemCommand(&.{
+                "python3",
+                b.pathFromRoot("map_regs.py"),
+                dis_path,
+                dis_path,   // same path → in-place substitution
+            });
+            regs_cmd.has_side_effects = true;
+            regs_cmd.step.dependOn(&py_cmd.step);
+            b.default_step.dependOn(&regs_cmd.step);
+        }
     }
 }
 
