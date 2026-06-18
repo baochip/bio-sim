@@ -13,5 +13,5 @@
     { "signal": "gpio_dir", "bit": 21 },
     { "signal": "irq" }
   ],
-  "run":   { "max_cycles": 100000, "stop_on_trap": true }
+  "run":   { "max_cycles": 10000, "stop_on_trap": true }
 }
