@@ -34,8 +34,6 @@ You can also run the clang-to-rust converter stand-alone with `python3 .\clang2r
 
 Adding the `"-Demit-listing=true"` argument will cause the build script to search for a viable copy of `objdump` for the riscv32 architecture on your local machine so that it can create a disassembly listing suitable for use with `codezoom`.
 
-`codezoom` is our hand-rolled utility that allows you to correlate a line of symbolic assembly with a point in the waveform. Unfortunately, it requires installing our custom build of `gtkwave`. It's a nice ergonomic feature, but a heavy lift in terms of prerequisites.
-
 Unfortunately, the Zig riscv toolchain does not come with a suitable `objdump` so if you want a toolchain-free build or you don't know what toolchains are, this feature is unavailable. However, the script should work with most standard distro riscv toolchains, or you can grab the [xpack toolchain](https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases) and use it.
 
 For those who do not want to install/know how to install a toolchain but have access to containers, there is a Dockerfile in this directory that can build a container that has the necessary tools.

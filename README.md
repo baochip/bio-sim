@@ -206,11 +206,16 @@ This example causes GPIO 21 to wiggle up and down, which you can see with the 0-
 
 ### Viewing Waveforms
 
+Adding the `"-Demit-listing=true"` argument will cause the build script to search for a viable copy of `objdump` for the riscv32 architecture on your local machine so that it can create a disassembly listing suitable for use with `codezoom`. You can use `codezoom` in two ways:
+
+- Web-based [surfer]() interface
+- `gtkwave` desktop interface
+
+The web-based `surfer` interface is convenient and low-friction, but it has some limitations, such as an inability to expand busses into individual signals.
+
 #### Web-Based `surfer` Viewer
 
-You can view the `blink.fst` waveform using the web-based [surfer](https://surfer-project.org/) viewer. Click the "three-bar menu" and do `File->Open` or type `ctrl-o` and upload `waveform/blink.fst`. Then, do `File->Load State...` and upload [`surfer/bio.surf.ron`](./surfer/bio.surf.ron) to display some starter waveforms.
-
-We do not currently have a `surfer` extension that supports code zooming.
+You can view the `blink.fst` waveform using the web-based [surfer](https://baochip.com/bio-surfer/) viewer. The version on baochip.com supports code zooming. The downside of the `surfer` viewer is that it does not have support for some features such as expanding busses into bit-vector waveforms.
 
 #### Code Zoom with `gtkwave`
 
