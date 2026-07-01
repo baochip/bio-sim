@@ -5,10 +5,13 @@
   "fclk_mhz": 700,
   "trace": { "file": "i2s.fst" },
   "commands": [
-    // this program is a stand-in to check the test bench and make sure it's valid
-    // TODO: replace with an actual i2s implementation once I have it
-    { "cmd": "load",  "core": 0, "bin": "sw/invert/invert.bin" },
-    { "cmd": "clock", "core": 0, "style": "int", "freq_hz": 700000000 },
+    { "cmd": "load",  "core": 0, "bin": "sw/i2s/i2s.bin" },
+    {
+      "cmd": "clock",
+      "core": 0,
+      "style": "frac",
+      "freq_hz": 6144000
+    },
     { "cmd": "start", "cores": [0] },
     { "cmd": "serve", "port": 5555, "mode": "driven" }
   ]
