@@ -1,0 +1,11 @@
+{
+  "fclk_mhz": 700,
+  "trace": { "file": "multicore.fst" },
+  "commands": [
+    { "cmd": "poke",    "name": "sfr_config", "value": "0x000" },
+    { "cmd": "load",  "core": 0, "bin": "sw/core0/core0.bin" },
+    { "cmd": "load",  "core": 1, "bin": "sw/core1/core1.bin" },
+    { "cmd": "start", "cores": [0, 1], "restart": true, "clkdiv_restart": true },
+    { "cmd": "run",    "cycles": 1000, "stop_on_trap": false }
+  ]
+}
