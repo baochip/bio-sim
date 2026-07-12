@@ -26,7 +26,7 @@ void main(void) {
         wait_quantum();
         // handle ws
         if (cycle_count == 0) {
-            clear_gpio_pins_n(!ws_mask);
+            clear_gpio_pins_n(~ws_mask);
         }
         if (cycle_count == 1) {
             sample = 0;
@@ -34,17 +34,17 @@ void main(void) {
         if (cycle_count == 32) {
             set_gpio_pins(ws_mask);
         }
-        clear_gpio_pins_n(!sck_mask);
+        clear_gpio_pins_n(~sck_mask);
 
         wait_quantum();
         if (read_gpio_pins() & sd_mask) {
             sample |= 1;
         }
         set_gpio_pins(sck_mask);
-        sample <<= 1;
-        if (cycle_count == 25) {
+        if (cycle_count == 24) {
             push_fifo0(sample);
         }
+        sample <<= 1;
         cycle_count ++;
         cycle_count %= 64;
     }
