@@ -1,0 +1,18 @@
+// Sim-side setup for the live I2S workflow. Does load/clock/start, then opens
+// a DRIVEN serve socket. The data (inject + run + fifo_drain) is streamed by:
+//   ./clients/i2s.py --port 5555
+{
+  "fclk_mhz": 700,
+  "trace": { "file": "i2s.fst" },
+  "commands": [
+    { "cmd": "load",  "core": 0, "bin": "sw/i2s/i2s.bin" },
+    {
+      "cmd": "clock",
+      "core": 0,
+      "style": "frac",
+      "freq_hz": 6144000
+    },
+    { "cmd": "start", "cores": [0] },
+    { "cmd": "serve", "port": 5555, "mode": "driven" }
+  ]
+}
