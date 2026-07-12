@@ -29,7 +29,7 @@ ap.add_argument("--port", type=int, help="driven serve port to drive live")
 ap.add_argument("--host", default="127.0.0.1")
 ap.add_argument("--freq",  type=float, default=1000.0, help="sine frequency, Hz")
 ap.add_argument("--rate",  type=int,   default=44100,  help="sample rate, Hz")
-ap.add_argument("--bits",  type=int,   default=16,     help="bits per channel")
+ap.add_argument("--bits",  type=int,   default=24,     help="bits per channel")
 ap.add_argument("--fclk",  type=float, default=700e6,  help="fclk in Hz")
 ap.add_argument("--frames", type=int,  default=16,     help="stereo samples (mic default kept modest: socket round-trips)")
 ap.add_argument("--frames-per-drain", type=int, default=2, help="(source) drain fifo every N frames")
@@ -200,7 +200,6 @@ while captured < a.frames and cycles < MAX_CYCLES:
 
     # ---- WS edge: a new channel slot begins ----
     if ws != prev_ws:
-        print("got ws change")
         if waiting:
             if prev_ws == 1 and ws == 0:      # FIRST FALLING EDGE -> start
                 waiting = False
@@ -210,6 +209,7 @@ while captured < a.frames and cycles < MAX_CYCLES:
                 frame += 1
                 captured += 1
             word  = sample_word(max(frame, 0)) if drives_this_channel(is_left) else 0
+            print(f"word: 0x{word:x}")
             falls = 0
             if drives_this_channel(is_left):
                 sent_log.append((("L" if is_left else "R"), signed(word)))
