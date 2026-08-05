@@ -235,6 +235,10 @@ From there, you can search for more signals to view, and drag them into the wave
 
 This demo works identically to `blink`, just replace `blink` with `test-ws2812`. This is a slightly more complicated program that simulates driving a WS2812 LED chain.
 
+### The `nec_rx` demo
+
+This demo works identically to `blink`, just replace `blink` with `nec_rx`. It decodes NEC infrared frames, clocked externally off the receiver's pin so that each quantum is a rising edge. Its host interface and interval reference are in [sw/nec_rx/README.md](./sw/nec_rx/README.md).
+
 ### The `interactive` demo
 
 Build the `invert` program:
