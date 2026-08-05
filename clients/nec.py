@@ -78,10 +78,12 @@ cfg = {
     "commands": [
         {"cmd": "load", "core": 0, "bin": a.firmware},
         {"cmd": "clock", "core": 0, "style": "external", "pin": a.pin},
-        # pin mask, then the five boundaries in ticks
+        {"cmd": "start", "cores": [0]},
+        # pin mask, then the five boundaries in ticks. After start: its restart
+        # clears the FIFOs, so words written earlier are lost and the program
+        # blocks forever on its first read.
         {"cmd": "fifo_write", "bank": 0,
          "data": [1 << a.pin] + [ticks(us) for us in BOUNDS_US]},
-        {"cmd": "start", "cores": [0]},
         {"cmd": "inject",
          "events": [{"cycle": c, "pin": p, "value": v} for c, p, v in events]},
         {"cmd": "run", "cycles": total, "stop_on_trap": False},
