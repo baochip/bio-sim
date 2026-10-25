@@ -48,7 +48,7 @@ ABI_TO_ABS = {
 _PATTERN = re.compile(
     r'(?<![a-zA-Z0-9_])(' +
     '|'.join(re.escape(k) for k in sorted(ABI_TO_ABS, key=len, reverse=True)) +
-    r')(?![a-zA-Z0-9_])'
+    r')(?![a-zA-Z0-9_:])'
 )
 
 
