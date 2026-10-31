@@ -16,6 +16,10 @@ Options:
     --end-label L     End label name (default: derived from module)
     --label-base N    Starting numeric label number (default: 20)
     -o FILE           Override output file path
+    --emit-binary     Generate .bin with post-link verification and JAL repair
+    --zig-exe PATH    Zig executable used for binary assembly/linking
+    --emit-listing    Generate a disassembly listing
+    --objdump PATH    Select the RISC-V objdump executable
 """
 
 import argparse
@@ -23,6 +27,7 @@ import re
 import sys
 import os
 from datetime import datetime
+from bio_errata_check import check_linked_binary
 
 # ============================================================================
 # Register translation: x16-x31 ABI names -> raw xN form
@@ -697,9 +702,14 @@ def convert_line(line, label_map, label_positions, current_line_idx, alias_label
 #   to register 16-19 (x16-x19) for just these instruction types,
 #   a spurious pending read is made from the corresponding FIFO.
 #   For U-type (lui/auipc), bits [19:15] = imm[7:3].
-#   For J-type (jal), bits [19:15] = imm[10:6] (after J-encoding shuffle).
-#   Fix: decompose the immediate so the problematic bits are avoided,
-#   using a temp register saved/restored via stack.
+#   For J-type (jal), bits [19:15] = imm[19:15].
+#   Workarounds:
+#     - U-type (lui/auipc): decompose unsafe immediates using a
+#       temporary register saved/restored via the stack.
+#     - Symbolic JAL/j: adjust instruction layout after linking,
+#       then re-link and verify the final machine code.
+#     - Numeric-offset JAL: no automatic repair; when --emit-binary
+#       is enabled, reject unsafe linked instructions.
 #
 # BUG 2 ("phantom rs2"): For non-R/S/B-type instructions, the 5-bit
 #   field at instruction bits [24:20] should be gated off but isn't.
@@ -709,10 +719,10 @@ def convert_line(line, label_map, label_positions, current_line_idx, alias_label
 #     - I-type (addi, andi, ori, etc.): bits [24:20] = imm[4:0]
 #     - I-type loads (lw, lh, lb, etc.): bits [24:20] = offset[4:0]
 #     - I-type shifts (slli, srli, srai): bits [24:20] = shamt[4:0]
-#     - U-type (lui, auipc): bits [24:20] = imm[8:4]
-#     - J-type (jal): bits [24:20] = imm[4:0] (after J-encoding shuffle)
-#   Fix: varies by instruction type - decompose shifts, adjust offsets
-#   for loads/stores, split immediates for ALU ops, etc.
+#     - U-type (lui, auipc): bits [24:20] = imm[12:8]
+#     - J-type (jal): bits [24:20] = {imm[4:1], imm[11]}
+#   Other workarounds include splitting shifts, adjusting load offsets,
+#   and decomposing ALU immediates.
 #
 # The patching runs after convert_line (Pass 2) and before format_output.
 # Each instruction is parsed, checked against the dispatch table, and
@@ -821,21 +831,11 @@ def _u_type_phantom_rs2(imm20):
 
 def _j_type_phantom_rs2(imm21):
     """
-    Bug 2 for J-type (jal): check bits [24:20] of the encoded instruction.
-    J-type: inst[30:21] = imm[10:1], inst[20] = imm[11]
-    So inst bits [24:20] = {imm[3:1], imm[11], imm[20]}... actually let me
-    work this out properly.
-    inst[24] = imm[4], inst[23] = imm[3], inst[22] = imm[2], inst[21] = imm[1],
-    inst[20] = imm[11].
-    So the 5-bit field = (imm[4:1] << 1) | imm[11].
-    Wait, no. inst[30:21] = imm[10:1]. So:
-      inst[24] = imm[4]
-      inst[23] = imm[3]
-      inst[22] = imm[2]
-      inst[21] = imm[1]
-      inst[20] = imm[11]
-    field = (imm >> 1) & 0xF  -> gives imm[4:1], shift left 1
-    field = ((imm >> 1) & 0xF) << 1 | ((imm >> 11) & 1)
+    For J-type instructions:
+    inst[24:21] = imm[4:1]
+    inst[20]    = imm[11]
+
+    The resulting five-bit field triggers BUG2 when it equals 20.
     """
     field = (((imm21 >> 1) & 0xF) << 1) | ((imm21 >> 11) & 1)
     return field == 20
@@ -881,7 +881,7 @@ def _build_constant_in_reg(temp_reg, diff):
     Build instructions to load `diff` into temp_reg, where diff is the
     bits we cleared from a U-type immediate.
 
-    Returns (safe_lui_imm, [instructions to build diff in temp_reg]).
+    Returns a list of instructions that construct diff in temp_reg.
     The caller does: lui rd, safe_lui_imm; then these instructions; then add rd, rd, temp_reg.
 
     We need to be careful that our generated instructions don't themselves
@@ -1100,57 +1100,42 @@ def _patch_auipc(mnemonic, operands, original_instr):
     return result
 
 
+
 def _patch_jal(mnemonic, operands, original_instr):
     """
-    Patch jal rd, offset for Bug 1 and Bug 2.
-    jal is PC-relative so we can't trivially decompose.
+    Inspect numeric-offset JAL instructions for BUG1 and BUG2.
 
-    Simply emit a warning when this case is encountered. It is only triggered when
-    when the final binary output - after the labels are resolved - has a value
-    of 20 in the immediate field, e.g. "jal x1, 20" (*not* '20f', literally the value
-    20).
-
-    This is a rare edge case - emit a warning to review - if it triggers,
-    the fix is to just insert a NOP after the JAL instruction, and
-    the label will have shifted to avoid triggering the bug.
+    Symbolic JALs are handled by post-link auto-repair.
+    Unsafe numeric-offset JALs remain unchanged and must be
+    rejected by the post-link verifier when --emit-binary is used.
     """
-    # jal can be "jal rd, offset" or pseudo "jal offset" (rd=ra)
     if len(operands) == 1:
-        # Pseudo form: jal target
-        return None  # likely a label, can't analyze
-    if len(operands) != 2:
+        imm_str = operands[0]
+    elif len(operands) == 2:
+        imm_str = operands[1]
+    else:
         return None
-    rd = operands[0]
-    imm = _imm_to_int(operands[1])
+
+    imm = _imm_to_int(imm_str)
     if imm is None:
-        return None  # label reference, can't analyze statically
+        return None
 
     imm21 = imm & 0x1FFFFF
-
-    has_bug1 = _j_type_phantom_rs1(imm21)
-    has_bug2 = _j_type_phantom_rs2(imm21)
-
-    if not has_bug1 and not has_bug2:
-        return None
-
-    # For jal with a numeric offset that hits the bug, replace with
-    # auipc + jalr (which are I-type and won't trigger bug 1).
-    # jalr rd, offset(temp) -- but we need to compute the right split.
-    # Actually since jal is rare with numeric immediates in compiler output,
-    # just emit a warning comment for now.
     bugs = []
-    if has_bug1:
-        bugs.append("B1:phantom-rs1")
-    if has_bug2:
-        bugs.append("B2:bits24:20=20")
-    bug_desc = "+".join(bugs)
 
-    result = []
-    result.append((None, _make_errata_comment(original_instr, "1/2", bug_desc)))
-    result.append((None, "// WARNING: jal with numeric immediate - manual review needed"))
-    result.append((original_instr, None))
-    WARNINGS.append("JAL with numeric intermediate detected - manual review for type 2 bug needed")
-    return result
+    if _j_type_phantom_rs1(imm21):
+        bugs.append("BUG1")
+    if _j_type_phantom_rs2(imm21):
+        bugs.append("BUG2")
+
+    if bugs:
+        WARNINGS.append(
+            f"WARNING: numeric JAL left unchanged: "
+            f"{original_instr} ({', '.join(bugs)}); "
+            f"post-link verification required"
+        )
+
+    return None
 
 
 def _patch_shift_imm(mnemonic, operands, original_instr):
@@ -1476,7 +1461,8 @@ def p2align_power(align_bytes):
     return (align_bytes).bit_length() - 1
 
 
-def format_asm_output(fn_name, converted_lines, data_objects, label_map):
+def format_asm_output(fn_name, converted_lines, data_objects, label_map,
+                      jal_marker_indices=()):
     """
     Emit a standard RISC-V .s file from the converted + errata-patched lines,
     suitable for assembling into a flat binary.
@@ -1499,10 +1485,18 @@ def format_asm_output(fn_name, converted_lines, data_objects, label_map):
     parts.append("    .p2align 2")
     parts.append("")
 
-    filtered = [(instr, comment) for instr, comment in converted_lines
-                if instr is not None or comment is not None]
+    marker_set = set(jal_marker_indices)
 
-    for instr, comment in filtered:
+    filtered = [
+        (i, instr, comment)
+        for i, (instr, comment) in enumerate(converted_lines)
+        if instr is not None or comment is not None
+    ]
+
+    for i, instr, comment in filtered:
+        if i in marker_set:
+            parts.append(f".Lbio_jal_{i}:")
+
         # Convert Rust-style // comments to asm # comments
         comment_str = ""
         if comment:
@@ -1520,6 +1514,14 @@ def format_asm_output(fn_name, converted_lines, data_objects, label_map):
         else:
             parts.append(f"    {instr}{comment_str}")
 
+    # Zero-byte marker resolved by the linker after instruction relaxation.
+    # Data objects and their alignment follow this boundary.
+    parts.extend([
+        "",
+        "    .globl __bio_postlink_code_end",
+        "__bio_postlink_code_end:",
+    ])
+
     # Data objects - packed words, placed after the code
     for obj in data_objects:
         num   = label_map[obj.name]
@@ -1532,6 +1534,18 @@ def format_asm_output(fn_name, converted_lines, data_objects, label_map):
         parts.append(f"{num}:  # {obj.name}")
         for w in words:
             parts.append(f"    .word 0x{w:08x}")
+
+    # Link-resolved code extent, in a separate temporary section.
+    # This footer is removed from the final .bin after verification.
+    parts.extend([
+        "",
+        '    .section .bio_metadata,"a",@progbits',
+    ])
+
+    for i in sorted(marker_set):
+        parts.append(f"    .word .Lbio_jal_{i}")
+
+    parts.append("    .word __bio_postlink_code_end")
 
     return "\n".join(parts) + "\n"
 
@@ -1613,7 +1627,8 @@ def assemble_to_listing(asm_path, obj_path, dis_path, zig_exe, objdump_exe, star
         f.write(r.stdout)
 
 
-def assemble_to_binary(asm_path, ld_path, bin_path, zig_exe):
+def assemble_to_binary(asm_path, ld_path, bin_path, zig_exe,
+                       *, marker_words=0, verify=True):
     """
     Assemble + link the generated .s file into a flat binary using zig cc.
 
@@ -1623,21 +1638,37 @@ def assemble_to_binary(asm_path, ld_path, bin_path, zig_exe):
     """
     import subprocess
 
+    # Reserve a 4-byte code-end marker and one 4-byte address
+    # per marked symbolic jump during the temporary probe link.
+    # The final image remains limited to 0xF00 bytes.
     linker_script = """OUTPUT_FORMAT(binary)
 ENTRY(0)
 MEMORY {
-    MEM : ORIGIN = 0x00000000, LENGTH = 0xF00
+    MEM : ORIGIN = 0x00000000, LENGTH = 0xF04
 }
 SECTIONS {
     . = 0x0;
     .text   : { *(.text*)   } > MEM
     .rodata : { *(.rodata*) } > MEM
     .data   : { *(.data*)   } > MEM
+    .bio_metadata : { *(.bio_metadata) } > MEM
     /DISCARD/ : { *(.eh_frame*) *(.note*) *(.comment) }
 }
 """
+    if marker_words:
+        linker_script = linker_script.replace(
+            "LENGTH = 0xF04",
+            f"LENGTH = 0x{0xF04 + 4 * marker_words:X}",
+        )
+
     with open(ld_path, "w") as f:
         f.write(linker_script)
+
+    # Remove stale outputs before rebuilding.
+    try:
+        os.remove(bin_path)
+    except FileNotFoundError:
+        pass
 
     cmd = [
         zig_exe, "cc",
@@ -1657,6 +1688,23 @@ SECTIONS {
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
         sys.exit(f"[ERROR] Assembly/linking failed for {asm_path}")
+    if not verify:
+        return
+    try:
+        code_end = check_linked_binary(bin_path)
+    except (ValueError, OSError) as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        try:
+            os.remove(bin_path)
+        except FileNotFoundError:
+            pass
+        sys.exit(1)
+
+    print(
+        f"  post-link errata: PASS "
+        f"({code_end} executable bytes)",
+        file=sys.stderr,
+    )
     size = os.path.getsize(bin_path)
     headroom = 0xF00 - size
     if headroom < 128:
@@ -1734,6 +1782,157 @@ def format_output(fn_name, start_label, end_label, converted_lines, data_objects
 
     parts.append(");")
     return "\n".join(parts)
+
+
+
+
+def _symbolic_jump_direction(instr):
+    """Return f/b for a numeric-label JAL or j pseudo-instruction."""
+    mnemonic, operands = _parse_instruction(instr)
+
+    if mnemonic == "jal" and len(operands) in (1, 2):
+        pass
+    elif mnemonic == "j" and len(operands) == 1:
+        pass
+    else:
+        return None
+
+    match = re.fullmatch(r"\d+([bf])", operands[-1])
+    return match.group(1) if match else None
+
+
+def _symbolic_jal_indices(lines):
+    """Find symbolic jumps that may encode to 32-bit JAL instructions."""
+    return [
+        i for i, (instr, _) in enumerate(lines)
+        if _symbolic_jump_direction(instr) is not None
+    ]
+
+
+def _insert_jal_nops(lines, indices):
+    """Change selected jump displacements by adding a 2-byte NOP."""
+    bad = set(indices)
+    nop = [
+        (".option push", None),
+        (".option rvc", None),
+        ("c.nop", "// Automatic JAL erratum workaround"),
+        (".option pop", None),
+    ]
+
+    result = []
+
+    for i, row in enumerate(lines):
+        direction = None
+
+        if i in bad:
+            direction = _symbolic_jump_direction(row[0])
+
+            if direction is None:
+                raise ValueError(
+                    f"Not a symbolic JAL/j at index {i}"
+                )
+
+            # A backward jump needs padding before the jump.
+            if direction == "b":
+                result.extend(nop)
+
+        result.append(row)
+
+        # A forward jump needs padding after the jump.
+        if direction == "f":
+            result.extend(nop)
+
+    return result
+
+
+def auto_repair_symbolic_jals(fn_name, converted_lines,
+                               data_objects, label_map,
+                               zig_exe, zig_out):
+    """Iteratively repair unsafe symbolic JALs using linked addresses."""
+    import tempfile
+    from pathlib import Path
+    from bio_errata_check import scan_linked_code
+
+    lines = list(converted_lines)
+    repaired_count = 0
+    max_rounds = 8
+
+    for attempt in range(max_rounds + 1):
+        markers = _symbolic_jal_indices(lines)
+
+        if not markers:
+            return lines, repaired_count, None
+
+        asm_text = format_asm_output(
+            fn_name, lines, data_objects, label_map,
+            jal_marker_indices=markers,
+        )
+
+        with tempfile.TemporaryDirectory(
+            prefix="bio-jal-", dir=zig_out
+        ) as tmp:
+            root = Path(tmp)
+            asm = root / "probe.s"
+            ld = root / "probe.ld"
+            binary = root / "probe.bin"
+
+            asm.write_text(asm_text, encoding="utf-8")
+
+            assemble_to_binary(
+                str(asm), str(ld), str(binary), zig_exe,
+                marker_words=len(markers), verify=False,
+            )
+            linked = binary.read_bytes()
+
+        footer_size = 4 * (len(markers) + 1)
+        if len(linked) < footer_size + 2:
+            raise ValueError("Missing JAL probe metadata")
+
+        image = linked[:-footer_size]
+        footer = linked[-footer_size:]
+
+        addresses = [
+            int.from_bytes(footer[4*i:4*i+4], "little")
+            for i in range(len(markers))
+        ]
+        code_end = int.from_bytes(footer[-4:], "little")
+
+        if len(image) > 0xF00:
+            raise ValueError("BIO image exceeds 0xF00 bytes")
+
+        if (len(set(addresses)) != len(addresses)
+                or any(pc % 2 or pc >= code_end for pc in addresses)):
+            raise ValueError("Invalid JAL marker addresses")
+
+        issues = scan_linked_code(image, code_end)
+
+        if not issues:
+            return lines, repaired_count, image
+
+        if attempt == max_rounds:
+            raise ValueError("JAL repair did not converge")
+
+        index_by_pc = dict(zip(addresses, markers))
+        bad_indices = set()
+
+        for pc, word, kind in issues:
+            if (word & 0x7F) != 0x6F or pc not in index_by_pc:
+                raise ValueError(
+                    f"Cannot auto-repair instruction "
+                    f"0x{pc:04x}=0x{word:08x} ({kind})"
+                )
+            bad_indices.add(index_by_pc[pc])
+
+        lines = _insert_jal_nops(lines, bad_indices)
+        repaired_count += len(bad_indices)
+
+        print(
+            f"  JAL auto-repair pass {attempt + 1}: "
+            f"{len(bad_indices)} JAL(s)",
+            file=sys.stderr,
+        )
+
+    raise ValueError("Unexpected JAL repair termination")
 
 
 # ============================================================================
@@ -1827,12 +2026,47 @@ def main():
     # Pass 3: apply coprocessor errata patches
     converted, errata_count = apply_errata_patches(converted)
 
-    result = format_output(fn_name, start_label, end_label, converted, data_objects, label_map)
+    repair_count = 0
+    probed_image = None
 
-    with open(output_path, "w") as f:
-        f.write(result + "\n")
+    if args.emit_binary:
+        output_dir = os.path.dirname(output_path) or "."
+        binary_path = os.path.join(
+            output_dir, f"{args.module}.bin"
+        )
 
-    print(f"\nWrote {output_path}", file=sys.stderr)
+        # Prevent stale successful artifacts after repair failure.
+        for path in (output_path, binary_path):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+
+        try:
+            converted, repair_count, probed_image = (
+                auto_repair_symbolic_jals(
+                    fn_name, converted, data_objects,
+                    label_map, args.zig_exe, args.zig_out,
+                )
+            )
+        except (ValueError, OSError) as exc:
+            print(
+                f"[ERROR] JAL auto-repair failed: {exc}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    result = format_output(
+        fn_name, start_label, end_label,
+        converted, data_objects, label_map,
+    )
+
+    if repair_count:
+        print(
+            f"  automatically repaired JALs: {repair_count}",
+            file=sys.stderr,
+        )
+
     print(f"  input:  {input_path}", file=sys.stderr)
     print(f"  fn:     {fn_name}()", file=sys.stderr)
     print(f"  labels: {start_label} / {end_label}", file=sys.stderr)
@@ -1857,7 +2091,23 @@ def main():
         if args.emit_binary:
             ld_out  = os.path.join(args.zig_out, f"{args.module}_bio.ld")
             bin_out = os.path.join(out_dir, f"{args.module}.bin")
+
+            # Do not leave an old Rust artifact after a failed binary build.
+            try:
+                os.remove(output_path)
+            except FileNotFoundError:
+                pass
+
             assemble_to_binary(asm_out, ld_out, bin_out, args.zig_exe)
+            if probed_image is not None:
+                with open(bin_out, "rb") as f:
+                    final_image = f.read()
+
+                if final_image != probed_image:
+                    os.remove(bin_out)
+                    sys.exit(
+                        "[ERROR] Probe and final BIO binaries differ"
+                    )
             bin_bytes = os.path.getsize(bin_out)
             print(f"  binary: {bin_out} ({bin_bytes} bytes / {bin_bytes // 4} words)", file=sys.stderr)
 
@@ -1871,6 +2121,11 @@ def main():
                 dis_out = os.path.join(out_dir, f"{args.module}.dis")
                 assemble_to_listing(asm_out, obj_out, dis_out, args.zig_exe, objdump, start_label)
                 print(f"  listing: {dis_out} (via {objdump})", file=sys.stderr)
+
+    with open(output_path, "w") as f:
+        f.write(result + "\n")
+
+    print(f"\nWrote {output_path}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
