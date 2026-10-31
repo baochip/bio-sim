@@ -23,6 +23,7 @@ import re
 import sys
 import os
 from datetime import datetime
+from bio_errata_check import check_linked_binary
 
 # ============================================================================
 # Register translation: x16-x31 ABI names -> raw xN form
@@ -1520,6 +1521,14 @@ def format_asm_output(fn_name, converted_lines, data_objects, label_map):
         else:
             parts.append(f"    {instr}{comment_str}")
 
+    # Zero-byte marker resolved by the linker after instruction relaxation.
+    # Data objects and their alignment follow this boundary.
+    parts.extend([
+        "",
+        "    .globl __bio_postlink_code_end",
+        "__bio_postlink_code_end:",
+    ])
+
     # Data objects - packed words, placed after the code
     for obj in data_objects:
         num   = label_map[obj.name]
@@ -1532,6 +1541,14 @@ def format_asm_output(fn_name, converted_lines, data_objects, label_map):
         parts.append(f"{num}:  # {obj.name}")
         for w in words:
             parts.append(f"    .word 0x{w:08x}")
+
+    # Link-resolved code extent, in a separate temporary section.
+    # This footer is removed from the final .bin after verification.
+    parts.extend([
+        "",
+        '    .section .bio_metadata,"a",@progbits',
+        "    .word __bio_postlink_code_end",
+    ])
 
     return "\n".join(parts) + "\n"
 
@@ -1623,21 +1640,30 @@ def assemble_to_binary(asm_path, ld_path, bin_path, zig_exe):
     """
     import subprocess
 
+    # Reserve four extra bytes for temporary link metadata.
+    # The final image must still fit within 0xF00 bytes.
     linker_script = """OUTPUT_FORMAT(binary)
 ENTRY(0)
 MEMORY {
-    MEM : ORIGIN = 0x00000000, LENGTH = 0xF00
+    MEM : ORIGIN = 0x00000000, LENGTH = 0xF04
 }
 SECTIONS {
     . = 0x0;
     .text   : { *(.text*)   } > MEM
     .rodata : { *(.rodata*) } > MEM
     .data   : { *(.data*)   } > MEM
+    .bio_metadata : { *(.bio_metadata) } > MEM
     /DISCARD/ : { *(.eh_frame*) *(.note*) *(.comment) }
 }
 """
     with open(ld_path, "w") as f:
         f.write(linker_script)
+
+    # Remove stale outputs before rebuilding.
+    try:
+        os.remove(bin_path)
+    except FileNotFoundError:
+        pass
 
     cmd = [
         zig_exe, "cc",
@@ -1657,6 +1683,21 @@ SECTIONS {
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
         sys.exit(f"[ERROR] Assembly/linking failed for {asm_path}")
+    try:
+        code_end = check_linked_binary(bin_path)
+    except (ValueError, OSError) as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        try:
+            os.remove(bin_path)
+        except FileNotFoundError:
+            pass
+        sys.exit(1)
+
+    print(
+        f"  post-link errata: PASS "
+        f"({code_end} executable bytes)",
+        file=sys.stderr,
+    )
     size = os.path.getsize(bin_path)
     headroom = 0xF00 - size
     if headroom < 128:
@@ -1829,10 +1870,6 @@ def main():
 
     result = format_output(fn_name, start_label, end_label, converted, data_objects, label_map)
 
-    with open(output_path, "w") as f:
-        f.write(result + "\n")
-
-    print(f"\nWrote {output_path}", file=sys.stderr)
     print(f"  input:  {input_path}", file=sys.stderr)
     print(f"  fn:     {fn_name}()", file=sys.stderr)
     print(f"  labels: {start_label} / {end_label}", file=sys.stderr)
@@ -1857,6 +1894,13 @@ def main():
         if args.emit_binary:
             ld_out  = os.path.join(args.zig_out, f"{args.module}_bio.ld")
             bin_out = os.path.join(out_dir, f"{args.module}.bin")
+
+            # Do not leave an old Rust artifact after a failed binary build.
+            try:
+                os.remove(output_path)
+            except FileNotFoundError:
+                pass
+
             assemble_to_binary(asm_out, ld_out, bin_out, args.zig_exe)
             bin_bytes = os.path.getsize(bin_out)
             print(f"  binary: {bin_out} ({bin_bytes} bytes / {bin_bytes // 4} words)", file=sys.stderr)
@@ -1871,6 +1915,11 @@ def main():
                 dis_out = os.path.join(out_dir, f"{args.module}.dis")
                 assemble_to_listing(asm_out, obj_out, dis_out, args.zig_exe, objdump, start_label)
                 print(f"  listing: {dis_out} (via {objdump})", file=sys.stderr)
+
+    with open(output_path, "w") as f:
+        f.write(result + "\n")
+
+    print(f"\nWrote {output_path}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
