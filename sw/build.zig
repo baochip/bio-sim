@@ -79,11 +79,9 @@ pub fn build(b: *std.Build) void {
     //
     // Runs: python3 clang2rustasm.py <module_name>
     // The script lives next to build.zig. Skipped when -Dasm-only=true.
-    const py_cmd = b.addSystemCommand(&.{
-        "python3",
-        b.pathFromRoot("clang2rustasm.py"),
-        module_name,
-    });
+    const py_cmd = b.addSystemCommand(&.{ "python3", });
+    py_cmd.addFileArg(b.path("clang2rustasm.py"));
+    py_cmd.addArg(module_name);
     py_cmd.has_side_effects = true;
     if (emit_binary) {
         py_cmd.addArg("--emit-binary");
@@ -107,13 +105,11 @@ pub fn build(b: *std.Build) void {
 
         // Step 2b: rewrite ABI register names in the .dis listing.
         if (emit_listing) {
-            const dis_path = b.pathFromRoot(b.fmt("{s}/{s}.dis", .{ module_name, module_name }));
-            const regs_cmd = b.addSystemCommand(&.{
-                "python3",
-                b.pathFromRoot("map_regs.py"),
-                dis_path,
-                dis_path,   // same path → in-place substitution
-            });
+            const dis_path = b.path(b.fmt("{s}/{s}.dis", .{ module_name, module_name }));
+            const regs_cmd = b.addSystemCommand(&.{ "python3" });
+            regs_cmd.addFileArg(b.path("map_regs.py"));
+            regs_cmd.addFileArg(dis_path);
+            regs_cmd.addFileArg(dis_path); // same path → in-place substitution
             regs_cmd.has_side_effects = true;
             regs_cmd.step.dependOn(&py_cmd.step);
             b.default_step.dependOn(&regs_cmd.step);
