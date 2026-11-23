@@ -94,6 +94,14 @@ field at instruction bits [24:20] should be gated off but isn't.
 When that field equals 20 (0b10100), a spurious `quantum` signal
 triggers, which can affect the instruction fetch pipeline.
 
+The same fields act in more cases (names for them are the maintainers'
+choice): bits [19:15] equal to 20 halt for a quantum as in BUG 2, and
+bits [19:15] of lui/auipc equal to 30 wait for an event while the event
+mask is not 0. `clang2rustasm.py` patches both on lui/auipc (30 always,
+as the mask is not known at compile time), and `bio_errata_check.py`
+reports them and the related 16-bit shift and FIFO cases under neutral
+names such as `phantom-rs1-quantum` and `phantom-rs1-event`.
+
 For coders compiling from C, these erratum are transparently
 patched by the `clang2rustasm.py` script. Thus these erratum
 are primarily a challenge to coders hand-writing in assembly.
