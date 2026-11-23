@@ -795,6 +795,11 @@ def _has_relocation(instr_str):
 # The problematic register numbers for Bug 1
 BUG1_BAD_REGS = {16, 17, 18, 19}
 
+# Bits [19:15] of LUI/AUIPC also act when they equal 20 (halt until the
+# next quantum) or 30 (wait for an event while the event mask is not 0).
+# The mask is not known here, so 30 is always patched.
+U_TYPE_BAD_RS1 = BUG1_BAD_REGS | {20, 30}
+
 def _u_type_phantom_rs1(imm20):
     """
     For U-type (lui/auipc), check if bits [19:15] of the encoded instruction
@@ -803,7 +808,25 @@ def _u_type_phantom_rs1(imm20):
     So instruction bits [19:15] = imm[7:3].
     """
     field = (imm20 >> 3) & 0x1F
-    return field in BUG1_BAD_REGS
+    return field in U_TYPE_BAD_RS1
+
+
+def _u_type_comment(original_instr, imm20, has_rs1, has_bug2):
+    """Errata comment for a patched lui/auipc. Fields 20 and 30 in bits
+    [19:15] are not part of BUG 1 and get their own name."""
+    field = (imm20 >> 3) & 0x1F
+    bugs = []
+    if has_rs1:
+        bugs.append("B1:phantom-rs1" if field in BUG1_BAD_REGS else
+                    "phantom-rs1-quantum" if field == 20 else
+                    "phantom-rs1-event")
+    if has_bug2:
+        bugs.append("B2:bits24:20=20")
+    detail = "+".join(bugs)
+    if has_rs1 and field not in BUG1_BAD_REGS:
+        return f"// ERRATA {bugs[0]} patch: {original_instr} ({detail})"
+    bug_id = "1+2" if (has_rs1 and has_bug2) else ("1" if has_rs1 else "2")
+    return _make_errata_comment(original_instr, bug_id, detail)
 
 
 def _j_type_phantom_rs1(imm21):
@@ -996,12 +1019,6 @@ def _patch_lui(mnemonic, operands, original_instr):
     if not has_bug1 and not has_bug2:
         return None  # safe
 
-    bugs = []
-    if has_bug1:
-        bugs.append("B1:phantom-rs1")
-    if has_bug2:
-        bugs.append("B2:bits24:20=20")
-    bug_desc = "+".join(bugs)
 
     # Build fixup instructions
     safe_imm20 = imm20
@@ -1014,7 +1031,7 @@ def _patch_lui(mnemonic, operands, original_instr):
     fixup_instrs = _build_constant_in_reg(ERRATA_TEMP, diff)
 
     result = []
-    comment = _make_errata_comment(original_instr, "1+2" if (has_bug1 and has_bug2) else ("1" if has_bug1 else "2"), bug_desc)
+    comment = _u_type_comment(original_instr, imm20, has_bug1, has_bug2)
     result.append((None, comment))
 
     # Step 1: lui with safe immediate (may be 0, that's fine)
@@ -1064,12 +1081,6 @@ def _patch_auipc(mnemonic, operands, original_instr):
     if not has_bug1 and not has_bug2:
         return None
 
-    bugs = []
-    if has_bug1:
-        bugs.append("B1:phantom-rs1")
-    if has_bug2:
-        bugs.append("B2:bits24:20=20")
-    bug_desc = "+".join(bugs)
 
     safe_imm20 = imm20
     if has_bug1:
@@ -1080,7 +1091,7 @@ def _patch_auipc(mnemonic, operands, original_instr):
     diff = (imm20 - safe_imm20) & 0xFFFFF
 
     result = []
-    comment = _make_errata_comment(original_instr, "1+2" if (has_bug1 and has_bug2) else ("1" if has_bug1 else "2"), bug_desc)
+    comment = _u_type_comment(original_instr, imm20, has_bug1, has_bug2)
     result.append((None, comment))
 
     # auipc with safe immediate - this captures PC correctly
