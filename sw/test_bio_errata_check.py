@@ -97,6 +97,75 @@ class BioErrataTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "BUG2"):
                 check_linked_binary(binary)
 
+    def kinds(self, image):
+        return [kind for _, _, kind in scan_linked_code(image, len(image))]
+
+    def h(self, value):
+        return value.to_bytes(2, "little")
+
+    def test_u_type_rs1_quantum_and_event(self):
+        # lui a1, 0xa0 ([19:15] = 20) and lui a1, 0xff0 ([19:15] = 30)
+        self.assertEqual(self.kinds(w(0x000A05B7)), ["phantom-rs1-quantum"])
+        self.assertEqual(self.kinds(w(0x00FF05B7)), ["phantom-rs1-event"])
+
+    def test_jal_rs1_quantum(self):
+        # jal with [19:15] = 20: the quantum field acts without a read
+        self.assertEqual(self.kinds(w(0x000A00EF)), ["phantom-rs1-quantum"])
+
+    def test_fence_fields(self):
+        # fence with [19:15] = 16 and with [24:20] = 16
+        self.assertEqual(self.kinds(w(0x0008000F)), ["phantom-rs1-fifo"])
+        self.assertEqual(self.kinds(w(0x0100000F)), ["phantom-rs2-fifo"])
+
+    def test_compressed_shift_quantum(self):
+        # c.slli s0, 20 and c.srli s0, 20 (16-bit words were skipped)
+        self.assertEqual(self.kinds(self.h(0x0452)), ["phantom-rs2-quantum"])
+        self.assertEqual(self.kinds(self.h(0x8051)), ["phantom-rs2-quantum"])
+
+    def test_read_without_pop(self):
+        # c.slli x16, 16 and addi x5, x16, 16: x16 is read, not popped
+        self.assertEqual(self.kinds(self.h(0x0842)), ["fifo-read-without-pop"])
+        self.assertEqual(self.kinds(w(0x01080293)), ["fifo-read-without-pop"])
+
+    def test_pop_during_halt(self):
+        # add x5, x16, x20 and c.add x16, x20
+        self.assertEqual(self.kinds(w(0x014802B3)), ["fifo-pop-during-halt"])
+        self.assertEqual(self.kinds(self.h(0x9852)), ["fifo-pop-during-halt"])
+
+    def test_fence_rd(self):
+        # fence with rd = x16 and rd = x20; rd = x5 has no BIO effect
+        self.assertEqual(self.kinds(w(0x0000080F)), ["fence-writes-rd"])
+        self.assertEqual(self.kinds(w(0x00000A0F)), ["fence-writes-rd"])
+        self.assertEqual(self.kinds(w(0x0000028F)), [])
+
+    def test_pop_multicycle(self):
+        # mul x5, x16, x6
+        self.assertEqual(self.kinds(w(0x026802B3)), ["fifo-pop-multicycle"])
+
+    def test_illegal_word_fields(self):
+        # funct3 3 load (illegal on RV32) with [19:15] = 16
+        self.assertEqual(self.kinds(w(0x00083283)), ["phantom-rs1-fifo"])
+
+    def test_plain_bio_register_use_is_safe(self):
+        image = b"".join([
+            w(0x01400033),   # add x0, x0, x20 (quantum wait)
+            w(0x000802B3),   # add x5, x16, x0 (FIFO read)
+            w(0x01E002B3),   # add x5, x0, x30 (event wait)
+            w(0x00080293),   # addi x5, x16, 0
+            w(0x00582023),   # sw x5, 0(x16)
+            self.h(0x8816),  # c.mv x16, x5 (FIFO write)
+            self.h(0x82C2),  # c.mv x5, x16
+            self.h(0x0846),  # c.slli x16, 17
+        ])
+        self.assertEqual(self.kinds(image), [])
+
+    def test_documented_names_unchanged(self):
+        # BUG 1 and BUG 2 keep their names and are not reported twice
+        self.assertEqual(self.kinds(w(0x00080037)), ["BUG1 phantom-rs1"])
+        self.assertEqual(self.kinds(w(0x01400513)), ["BUG2 phantom-rs2"])
+        self.assertEqual(self.kinds(w(0x014A0537)),
+                         ["BUG2 phantom-rs2", "phantom-rs1-quantum"])
+
 
 if __name__ == "__main__":
     unittest.main()
